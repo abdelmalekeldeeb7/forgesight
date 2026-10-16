@@ -1,6 +1,6 @@
 const D = __DATA__;
 const P = D.P;
-const KIT = { slabOf, solidSvg, lineSvg, dotsSvg, iso, depthOf, sideSeam, planOutline, insetPlan, corners, cylinder, knurl, ring, lineOnTop };
+const KIT = { slabOf, solidSvg, lineSvg, dotsSvg, iso, depthOf, sideSeam, planOutline, insetPlan, corners, cylinder, knurl, ring, lineOnTop, pathOf };
 const glove = GLOVE.makeGlove(KIT, G, M, P, D.Z0);
 const root = document.querySelector(".fg");
 const stage = root.querySelector(".fg-stage");

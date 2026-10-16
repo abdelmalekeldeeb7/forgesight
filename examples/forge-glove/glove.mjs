@@ -4,11 +4,11 @@ export function makeGlove(k, G, M, P, Z0) {
   const D = (points, style) => k.dotsSvg(points, style);
   const at = (p) => k.iso(p, P);
   const V = G.viewOf(P);
-  const deep = (p) => G.dot3(p, V);
-  const add = G.add3, mul = G.mul3;
+  const LIGHT = G.lightOf(P);
+  const add = G.add3, mul = G.mul3, sub = G.sub3;
   const HALF = M.SEG_THICK / 2;
   const LINER = 2;
-  const RIDE = Z0 + M.PALM.thick / 2 + 3 - HALF;
+  const RIDE = Z0 + 14;
 
   function rounded(w, h, r, cy = 0, steps = 3) {
     const out = [];
@@ -19,59 +19,203 @@ export function makeGlove(k, G, M, P, Z0) {
     }
     return out;
   }
-  const shell = (w, thick, lift = 0) => {
+  // Armour shell riding on a segment of half-thickness `half`: a low arch over the back.
+  const shell = (w, thick, lift = 0, half = HALF) => {
     const hw = w / 2;
-    const base = HALF + LINER - 2.4 + lift;
-    const top = HALF + LINER + thick + 0.6 + lift;
-    return [[-hw, base], [hw, base], [hw, base + 1.6], [hw - 2.2, top], [-hw + 2.2, top], [-hw, base + 1.6]];
+    const base = half + LINER - 2.4 + lift;
+    const top = half + LINER + thick + 0.6 + lift;
+    const out = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = -1 + (2 * i) / 8;
+      out.push([hw * t, base + 1.4 + (top - base - 1.4) * Math.sqrt(1 - t * t * 0.86)]);
+    }
+    return [[hw, base], ...out.reverse(), [-hw, base]];
   };
-  const axisOf = (phi) => [Math.cos(phi), 0, -Math.sin(phi)];
-  const upOf = (phi) => [Math.sin(phi), 0, Math.cos(phi)];
-  const frame = (o, phi) => G.frameOf(o, axisOf(phi), [0, 1, 0], upOf(phi));
 
-  function fingerChain(f, flex) {
-    const angles = [flex.mcp, flex.pip, flex.dip];
+  // A solid lofted through rings of world points (same count, same order). Convex-ish
+  // shapes only: the fill is the hull, faces are shaded by their normal like prismOf.
+  function loftOf(rings) {
+    const n = rings[0].length;
+    const flat = rings.map((ring) => ring.map(at));
+    const centre = rings.map((ring) => mul(ring.reduce((a, b) => add(a, b), [0, 0, 0]), 1 / n));
+    const buckets = [[], [], [], [], []];
+    const crease = [];
+    const seen = rings.map(() => new Array(n).fill(false));
+    for (let i = 0; i < rings.length - 1; i++) for (let j = 0; j < n; j++) {
+      const j1 = (j + 1) % n;
+      const A = rings[i][j], B = rings[i][j1], C = rings[i + 1][j1], Dd = rings[i + 1][j];
+      let nrm = add(G.cross3(sub(B, A), sub(Dd, A)), G.cross3(sub(Dd, C), sub(B, C)));
+      if (G.len3(nrm) < 1e-6) continue;
+      const mid = mul(add(add(A, B), add(C, Dd)), 0.25);
+      if (G.dot3(nrm, sub(mid, mul(add(centre[i], centre[i + 1]), 0.5))) < 0) nrm = mul(nrm, -1);
+      nrm = G.unit3(nrm);
+      if (G.dot3(nrm, V) <= 1e-6) continue;
+      if (i === 0) seen[0][j] = true;
+      if (i === rings.length - 2) seen[i + 1][j] = true;
+      buckets[G.bandOf(G.dot3(nrm, LIGHT))].push(k.pathOf([flat[i][j], flat[i][j1], flat[i + 1][j1], flat[i + 1][j]], true));
+    }
+    const last = rings.length - 1;
+    for (const [ri, other] of [[0, 1], [last, last - 1]]) {
+      const nrm = G.unit3(sub(centre[ri], centre[other]));
+      const spread = Math.max(...rings[ri].map((p) => G.len3(sub(p, centre[ri]))));
+      if (spread < 0.5 || G.dot3(nrm, V) <= 1e-6) continue;
+      buckets[G.bandOf(G.dot3(nrm, LIGHT))].push(k.pathOf(flat[ri], true));
+      for (let j = 0; j < n; j++) if (seen[ri][j]) crease.push(k.pathOf([flat[ri][j], flat[ri][(j + 1) % n]]));
+    }
+    const hull = G.hullOf(flat.flat());
+    return { fill: k.pathOf(hull, true), outline: k.pathOf(hull, true), crease: crease.join(""), top: buckets[4].join(""), shades: buckets.slice(0, 4).map((b) => b.join("")) };
+  }
+  const place = (F, s, [x, y]) => add(add(add(F.o, mul(F.a, s)), mul(F.u, x)), mul(F.v, y));
+  const ringAt = (F, s, poly) => poly.map((q) => place(F, s, q));
+
+  // Finger frames: pitch phi curls toward the palm, yaw psi splays toward the thumb.
+  const axisOf = (phi, psi = 0) => [Math.cos(phi) * Math.cos(psi), Math.cos(phi) * Math.sin(psi), -Math.sin(phi)];
+  const upOf = (phi, psi = 0) => [Math.sin(phi) * Math.cos(psi), Math.sin(phi) * Math.sin(psi), Math.cos(phi)];
+  const frame = (o, phi, psi = 0) => G.frameOf(o, axisOf(phi, psi), [-Math.sin(psi), Math.cos(psi), 0], upOf(phi, psi));
+
+  // A relaxed hand is never flat: each finger rests a little curled, more toward the little finger.
+  const REST = { mcp: 0.16, pip: 0.3, dip: 0.18 };
+  const CASCADE = [0.75, 1, 1.2, 1.45];
+  // Width and thickness at the start and end of each phalanx, as a share of the finger width.
+  const TAPER = [[[1, 0.92], [0.92, 0.84]], [[0.86, 0.8], [0.8, 0.74]], [[0.76, 0.7], [0.68, 0.62]]];
+  const sizeOf = (f, bone, t) => {
+    const [w, h] = TAPER[bone];
+    return { w: f.w * (w[0] + (w[1] - w[0]) * t), h: f.w * 0.88 * (h[0] + (h[1] - h[0]) * t) };
+  };
+
+  function fingerChain(f, flex, fi = M.FINGERS.indexOf(f)) {
+    const c = CASCADE[fi] ?? 1;
+    const angles = ["mcp", "pip", "dip"].map((n) => Math.max(flex[n], REST[n] * c));
     const joints = [];
-    let p = [f.mcp, f.y, Z0];
+    let p = [f.mcp, f.y, Z0 + (f.z ?? 0)];
     let phi = 0;
+    const psi = f.splay ?? 0;
     f.bones.forEach((bone, i) => {
       const before = phi;
       phi += angles[i];
-      joints.push({ at: p, before, after: phi, theta: angles[i] });
-      p = add(p, mul(axisOf(phi), bone));
+      joints.push({ at: p, before, after: phi, theta: angles[i], psi });
+      p = add(p, mul(axisOf(phi, psi), bone));
     });
-    return { joints, tip: p, phi };
+    return { joints, tip: p, phi, psi };
   }
 
   function railOf(f, flex) {
     const chain = fingerChain(f, flex);
-    const pts = [[M.CUFF.x1, f.y, RIDE], [f.mcp - 16, f.y, RIDE], [f.mcp - 2, f.y, Z0]];
+    const psi = chain.psi;
+    const root = chain.joints[0].at;
+    const back = sub(root, mul(axisOf(0, psi), 16));
+    const pts = [[M.CUFF.x1, f.y * 0.8, RIDE], [back[0], back[1], RIDE], add(sub(root, mul(axisOf(0, psi), 2)), [0, 0, 0])];
     const lengths = [0];
-    for (let i = 1; i < pts.length; i++) lengths.push(lengths[i - 1] + G.len3(G.sub3(pts[i], pts[i - 1])));
+    for (let i = 1; i < pts.length; i++) lengths.push(lengths[i - 1] + G.len3(sub(pts[i], pts[i - 1])));
     const palmRun = lengths[lengths.length - 1];
     const along = (d) => {
       if (d <= palmRun) {
         let i = 1;
         while (i < lengths.length - 1 && lengths[i] < d) i++;
         const t = (d - lengths[i - 1]) / (lengths[i] - lengths[i - 1] || 1);
-        const a = G.unit3(G.sub3(pts[i], pts[i - 1]));
-        return { o: G.lerp3(pts[i - 1], pts[i], t), a, phi: Math.atan2(-a[2], a[0]) };
+        const a = G.unit3(sub(pts[i], pts[i - 1]));
+        const phi = Math.atan2(-a[2], Math.hypot(a[0], a[1]));
+        return { o: G.lerp3(pts[i - 1], pts[i], t), phi, psi: Math.atan2(a[1], a[0]), bone: 0 };
       }
       let s = d - palmRun - 2;
       for (let i = 0; i < f.bones.length; i++) {
         const j = chain.joints[i];
-        if (s <= f.bones[i] || i === f.bones.length - 1) return { o: add(j.at, mul(axisOf(j.after), s)), a: axisOf(j.after), phi: j.after };
+        if (s <= f.bones[i] || i === f.bones.length - 1) return { o: add(j.at, mul(axisOf(j.after, psi), s)), phi: j.after, psi, bone: i };
         s -= f.bones[i];
       }
     };
     return { along, palmRun, chain };
   }
+  const palmRunOf = (f) => railOf(f, { mcp: 0, pip: 0, dip: 0 }).palmRun;
 
+  // ── Palm: a dome, narrow at the wrist and widest across the knuckles, its far edge
+  // following the knuckle arc (middle finger furthest out, little finger furthest back).
+  const KNUCKLES = M.FINGERS.map((f) => [f.y, f.mcp]).sort((a, b) => a[0] - b[0]);
+  function knuckleX(y) {
+    const K = KNUCKLES;
+    if (y <= K[0][0]) return K[0][1] - 0.9 * (K[0][0] - y);
+    if (y >= K[K.length - 1][0]) return K[K.length - 1][1] - 0.6 * (y - K[K.length - 1][0]);
+    for (let i = 1; i < K.length; i++) if (y <= K[i][0]) {
+      const t = (y - K[i - 1][0]) / (K[i][0] - K[i - 1][0]);
+      const s = t * t * (3 - 2 * t);
+      return K[i - 1][1] + (K[i][1] - K[i - 1][1]) * s;
+    }
+  }
+  const PALM_STATIONS = [[-44, 58, 24, 2, 0], [-30, 66, 27, 2, -0.5], [-8, 76, 29, 1.5, -1.5], [18, 82, 29, 1, -2.5], [36, 82, 27, 0.5, -3], [70, 78, 22, 0.5, -3.5]];
+  function palmDims(x) {
+    const T = PALM_STATIONS;
+    if (x <= T[0][0]) return T[0].slice(1);
+    for (let i = 1; i < T.length; i++) if (x <= T[i][0]) {
+      const t = (x - T[i - 1][0]) / (T[i][0] - T[i - 1][0]);
+      return T[i].slice(1).map((v, j) => T[i - 1][j + 1] + (v - T[i - 1][j + 1]) * t);
+    }
+    return T[T.length - 1].slice(1);
+  }
+  const SE = (c, n) => Math.sign(c) * Math.abs(c) ** (2 / n);
+  // Cross-section of the hand at x, grown outward by `grow` (for the liner and plates).
+  // Angles run counter-clockwise from the little-finger side; the back of the hand is up.
+  function palmSection(x, grow = 0, a0 = 0, a1 = 2 * Math.PI, count = 28, endTrim = 3) {
+    const [w, t, cy, cz] = palmDims(x);
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      const a = a0 + ((a1 - a0) * i) / (a1 - a0 >= 2 * Math.PI - 1e-9 ? count : count - 1);
+      const c = Math.cos(a), s = Math.sin(a);
+      const y = cy - (w / 2 + grow) * SE(c, 2.6);
+      const z = Z0 + cz + (s > 0 ? t * 0.58 + grow : t * 0.42 + grow * 0.5) * SE(s, s > 0 ? 2.3 : 3.2);
+      out.push([Math.min(x, knuckleX(y) - endTrim), y, z]);
+    }
+    return out;
+  }
   function palm(style = {}) {
-    const plan = { x: M.PALM.x0, y: -M.PALM.half, w: M.PALM.x1 - M.PALM.x0, d: M.PALM.half * 2, r: 12 };
-    const z = Z0 - M.PALM.thick / 2;
-    const top = z + M.PALM.thick;
-    return S(k.slabOf(plan, z, M.PALM.thick, P, 8, 0.8), { tone: "lo", inner: L(k.sideSeam(plan, Z0, P, 8), { tone: "faint" }), ...style }) + L(k.planOutline(k.insetPlan(plan, 6), top, P, 8), { tone: "faint" });
+    const rings = PALM_STATIONS.map(([x]) => palmSection(x, LINER * 0.5));
+    return S(loftOf(rings), { tone: "lo", crease: "none", ...style });
+  }
+
+  // Thumb: metacarpal buried in the thenar pad, then the two phalanges.
+  const T = M.THUMB;
+  // `close` 0..1 folds the thumb across the curled fingers, as it does in a fist.
+  const THUMB_CLOSE = [[-0.12, 0.2], [-0.45, 0.55], [-0.75, 0.95]];
+  function thumbFrames(close = 0) {
+    const out = [];
+    let o = [T.cmc[0], T.cmc[1], Z0 + T.cmc[2]];
+    const lens = [T.meta, ...T.bones];
+    T.dirs.forEach(([yaw0, pitch0], i) => {
+      const yaw = yaw0 + THUMB_CLOSE[i][0] * close, pitch = pitch0 + THUMB_CLOSE[i][1] * close;
+      const a = [Math.cos(pitch) * Math.cos(yaw), Math.cos(pitch) * Math.sin(yaw), -Math.sin(pitch)];
+      const u0 = G.unit3(G.cross3([0, 0, 1], a));
+      const v0 = G.cross3(a, u0);
+      const r = T.roll;
+      const u = add(mul(u0, Math.cos(r)), mul(v0, Math.sin(r)));
+      const v = add(mul(u0, -Math.sin(r)), mul(v0, Math.cos(r)));
+      out.push({ F: G.frameOf(o, a, u, v), len: lens[i] });
+      o = add(o, mul(a, lens[i]));
+    });
+    return out;
+  }
+  const THUMB_SIZE = [[[26, 22], [22, 19]], [[21, 18], [19, 16]], [[18, 15], [16, 13]]];
+
+  function segmentLoft(F, len, w0, h0, w1, h1, tip = false, skin = 0.44) {
+    const sec = (w, h) => rounded(w, h, Math.min(w, h) * skin, 0, 3);
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const st = tip ? [[0, 0], [0.62, 0.62], [0.82, 0.82], [0.93, 0.93], [1, 1]] : [[0, 0], [1, 1]];
+    const shrink = tip ? [1, 1, 0.9, 0.68, 0.3] : [1, 1];
+    const rings = st.map(([s, t], i) => ringAt(F, 1 + s * (len - 2 - (tip ? 0 : 0)), sec(lerp(w0, w1, t) * shrink[i], lerp(h0, h1, t) * shrink[i]).map(([x, y]) => [x, y - (tip ? (1 - shrink[i]) * h1 * 0.2 : 0)])));
+    return loftOf(rings);
+  }
+  function platePaths(F, s0, s1, w0, w1, half0, half1, thick, lift = 0) {
+    if (s1 - s0 < 0.6) return null;
+    return loftOf([ringAt(F, s0, shell(w0, thick, lift, half0)), ringAt(F, s1, shell(w1, thick, lift, half1))]);
+  }
+  function plate(F, s0, s1, w0, w1, half0, half1, thick, style = {}, lift = 0) {
+    const paths = platePaths(F, s0, s1, w0, w1, half0, half1, thick, lift);
+    if (!paths) return "";
+    let detail = "";
+    if (s1 - s0 > 14) {
+      const top = (half0 + half1) / 2 + LINER + thick + 0.6 + lift;
+      const a = at(place(F, s0 + 3.2, [0, top])), b = at(place(F, s1 - 3.2, [0, top]));
+      detail = `<path class="iso-line" data-tone="faint" d="M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}"/>` + D([a, b], { size: 0.45, tone: "mid" });
+    }
+    return S(paths, { tone: "hi", crease: "lo", ...style }) + detail;
   }
 
   const armR = (s) => 30 - (4 * s) / 206;
@@ -84,9 +228,6 @@ export function makeGlove(k, G, M, P, Z0) {
     const F = G.frameOf([-250, 0, Z0], [1, 0, 0], [0, 1, 0], [0, 0, 1]);
     const r = armR(s1) + 0.6;
     return S(G.ringBand(s0, s1, armR(s0) - 1, r + 0.9, F, P), { tone: "mid" }) + D(G.dotsOf(F, s1, r + 0.2, 10, P, { fade: [0.04, 0.42] }), { size: 0.4, tone: "lo" });
-  }
-  function palmRunOf(f) {
-    return f.mcp - 16 - M.CUFF.x1 + Math.hypot(14, RIDE - Z0);
   }
   function knob(spot, index, n, top0) {
     const a = -2.1 + (4.2 * index) / (n - 1);
@@ -142,24 +283,6 @@ export function makeGlove(k, G, M, P, Z0) {
     return out.join("");
   }
 
-  function segment(o, phi, len, w, style = {}) {
-    return S(G.prismOf(frame(o, phi), rounded(w, M.SEG_THICK, 5.5), 1.8, len - 1.8, P), { tone: "lo", crease: "faint", ...style });
-  }
-  function joint(o, w) {
-    return S(G.sphereOf(o, w * 0.4, P, { steps: 28 }), { tone: "lo" });
-  }
-  function plate(o, phi, s0, s1, w, thick, style = {}, lift = 0) {
-    if (s1 - s0 < 0.6) return "";
-    const F = frame(o, phi);
-    let detail = "";
-    if (s1 - s0 > 14) {
-      const top = HALF + LINER + thick + 0.6 + lift;
-      const pt = (s) => at(G.add3(G.add3(F.o, G.mul3(F.a, s)), G.mul3(F.v, top)));
-      const a = pt(s0 + 3.2), b = pt(s1 - 3.2);
-      detail = `<path class="iso-line" data-tone="faint" d="M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}"/>` + D([a, b], { size: 0.45, tone: "mid" });
-    }
-    return S(G.prismOf(F, shell(w, thick, lift), s0, s1, P), { tone: "hi", crease: "lo", ...style }) + detail;
-  }
 
   function handItems(pose, p) {
     const items = [];
@@ -170,6 +293,8 @@ export function makeGlove(k, G, M, P, Z0) {
     const lit = pose.lit ?? {};
     const plates = M.platesOf(p);
     push(1, 0, palm());
+
+    // Back plates: shells that follow the dome of the hand, sliding out of the cuff.
     const backs = plates.filter((q) => q.kind === "back");
     backs.forEach((q, i) => {
       const travel = D0.back * deployed.back.reach;
@@ -177,18 +302,27 @@ export function makeGlove(k, G, M, P, Z0) {
       const end = Math.min(far, travel) + M.CUFF.x1;
       const start = Math.max(end - q.len, M.CUFF.x1);
       if (end - start < 0.8) return;
-      const plan = { x: start, y: -q.w / 2, w: end - start, d: q.w, r: Math.min(6, (end - start) / 2.2) };
-      const z = Z0 + M.PALM.thick / 2 + 0.4 + i * 0.7;
-      push(2, i, S(k.slabOf(plan, z, p.plateThick + 0.8, P, 6, 0.5), { tone: "hi", crease: "lo", inner: L(k.sideSeam(plan, z + 0.9, P, 6), { tone: "faint" }) }) + (end - start > 20 ? L(k.planOutline(k.insetPlan(plan, 6), z + p.plateThick + 0.8, P, 6), { tone: "faint" }) : "") + (end - start > 20 ? D(k.corners(plan, 3.2).map(([x, y]) => at([x, y, z + p.plateThick + 0.8])), { size: 0.4, tone: "mid" }) : ""));
+      const lift = LINER + 0.6 + i * 0.8;
+      const section = (x, grow) => palmSection(x, grow, 0.16 * Math.PI, 0.84 * Math.PI, 14, 7 - i);
+      const xs = [];
+      for (let x = start; x < end; x += 9) xs.push(x);
+      xs.push(end);
+      const rings = xs.map((x) => [...section(x, lift + p.plateThick), ...section(x, lift).reverse()]);
+      push(2, i, S(loftOf(rings), { tone: "hi", crease: "lo" }) + (end - start > 20 ? D([at(section(start + 4, lift + p.plateThick)[3]), at(section(start + 4, lift + p.plateThick)[10])], { size: 0.4, tone: "mid" }) : ""));
     });
+
     M.FINGERS.forEach((f, fi) => {
       const flex = flexOf(fi);
       const rail = railOf(f, flex);
       const { joints } = rail.chain;
+      const psi = rail.chain.psi;
       const base = 20 - fi;
       const under = (phi) => phi > 1.75;
       joints.forEach((j, bi) => {
-        push(under(j.after) ? 0 : 3, base * 100 + bi * 10, joint(j.at, f.w) + segment(j.at, j.after, f.bones[bi], f.w, lit.finger === fi && lit.bone === bi ? { lit: true } : {}));
+        const s0 = sizeOf(f, bi, 0), s1 = sizeOf(f, bi, 1);
+        const knuckle = S(G.sphereOf(j.at, s0.w * (bi === 0 ? 0.47 : 0.44), P, { steps: 28 }), { tone: "lo" });
+        const bone = S(segmentLoft(frame(j.at, j.after, psi), f.bones[bi], s0.w, s0.h, s1.w, s1.h, bi === 2), { tone: "lo", crease: "none", ...(lit.finger === fi && lit.bone === bi ? { lit: true } : {}) });
+        push(under(j.after) ? 0 : 3, base * 100 + bi * 10, knuckle + bone);
       });
       const chainTravel = (pose.stop && pose.stop.finger === fi ? Math.min(D0.fingers, pose.stop.share) : D0.fingers) * deployed.fingers.reach;
       const mine = plates.filter((q) => q.finger === fi && q.kind === "finger");
@@ -200,67 +334,78 @@ export function makeGlove(k, G, M, P, Z0) {
         if (end - start < 0.8) return;
         const j = joints[q.bone];
         const style = lit.plate === `${fi}.${q.bone}` ? { lit: true } : {};
-        if (end >= far - 0.01) push(under(j.after) ? 0 : 3, base * 100 + q.bone * 10 + 5, plate(j.at, j.after, 2, 2 + q.len, q.w, p.plateThick, style));
+        const a = sizeOf(f, q.bone, 2 / f.bones[q.bone]), b = sizeOf(f, q.bone, (2 + q.len) / f.bones[q.bone]);
+        // The fingertip plate stops short of the pad and rounds over the nail.
+        const tipCut = q.bone === 2 ? 3 : 0;
+        if (end >= far - 0.01) push(under(j.after) ? 0 : 3, base * 100 + q.bone * 10 + 5, plate(frame(j.at, j.after, psi), 2, 2 + q.len - tipCut, a.w + 2.4, b.w + 2.4, a.h / 2, b.h / 2, p.plateThick, style));
         else {
           const mid = rail.along((start + end) / 2);
-          push(3, base * 100 + 90 + q.bone, plate(mid.o, mid.phi, -(end - start) / 2, (end - start) / 2, q.w, p.plateThick, style));
+          push(3, base * 100 + 90 + q.bone, plate(frame(mid.o, mid.phi, mid.psi), -(end - start) / 2, (end - start) / 2, a.w + 2.4, b.w + 2.4, HALF, HALF, p.plateThick, style));
         }
       });
-      {
-        ["mcp", "pip", "dip"].forEach((name, ji) => {
-          const j = joints[ji];
-          const scale = { mcp: 1, pip: 0.82, dip: 0.66 }[name];
-          const r = (HALF + LINER + p.plateThick) * scale;
-          const arc = r * j.theta;
-          const open = 4 + arc;
-          const n = p.lames;
-          const cover = n * p.lameSlide;
-          const pos = [];
-          if (arc <= cover + 1e-6) for (let i = 0; i < n; i++) pos.push(((i + 0.5) / n) * open);
-          else {
-            const left = Math.ceil(n / 2);
-            for (let i = 0; i < left; i++) pos.push(2 + i * p.lameSlide);
-            for (let i = 0; i < n - left; i++) pos.push(open - 2 - i * p.lameSlide);
+      ["mcp", "pip", "dip"].forEach((name, ji) => {
+        const j = joints[ji];
+        const scale = { mcp: 1, pip: 0.82, dip: 0.66 }[name];
+        const r = (HALF + LINER + p.plateThick) * scale;
+        const arc = r * j.theta;
+        const open = 4 + arc;
+        const n = p.lames;
+        const cover = n * p.lameSlide;
+        const pos = [];
+        if (arc <= cover + 1e-6) for (let i = 0; i < n; i++) pos.push(((i + 0.5) / n) * open);
+        else {
+          const left = Math.ceil(n / 2);
+          for (let i = 0; i < left; i++) pos.push(2 + i * p.lameSlide);
+          for (let i = 0; i < n - left; i++) pos.push(open - 2 - i * p.lameSlide);
+        }
+        const gap = arc > cover + 1e-6;
+        const sJoint = f.bones.slice(0, ji).reduce((a, b) => a + b, 0);
+        const size = ji === 0 ? sizeOf(f, 0, 0) : sizeOf(f, ji - 1, 1);
+        const lw = size.w + 3, half = size.h / 2 + (ji === 0 ? 1.5 : 0.6);
+        pos.forEach((xi, li) => {
+          const straight = (((li + 0.5) / n) * 4) - 2;
+          const far = rail.palmRun + 2 + sJoint + straight + 4.5;
+          if (chainTravel < far - 0.01) {
+            const end = chainTravel;
+            const start = Math.max(end - 9, 0);
+            if (end - start < 0.8) return;
+            const mid = rail.along((start + end) / 2);
+            push(3, base * 100 + 95 + ji + li * 0.1, plate(frame(mid.o, mid.phi, mid.psi), -(end - start) / 2, (end - start) / 2, lw, lw, HALF, HALF, p.plateThick, {}, 0.6 + li * 0.45));
+            return;
           }
-          const gap = arc > cover + 1e-6;
-          const sJoint = f.bones.slice(0, ji).reduce((a, b) => a + b, 0);
-          pos.forEach((xi, li) => {
-            const straight = (((li + 0.5) / n) * 4) - 2;
-            const far = rail.palmRun + 2 + sJoint + straight + 4.5;
-            if (chainTravel < far - 0.01) {
-              const end = chainTravel;
-              const start = Math.max(end - 9, 0);
-              if (end - start < 0.8) return;
-              const mid = rail.along((start + end) / 2);
-              push(3, base * 100 + 95 + ji + li * 0.1, plate(mid.o, mid.phi, -(end - start) / 2, (end - start) / 2, f.w + 2, p.plateThick, {}, 0.6 + li * 0.45));
-              return;
-            }
-            let o, phi;
-            if (xi < 2) { phi = j.before; o = add(j.at, mul(axisOf(j.before), xi - 2)); }
-            else if (xi > 2 + arc) { phi = j.after; o = add(j.at, mul(axisOf(j.after), xi - 2 - arc)); }
-            else { phi = j.before + (xi - 2) / (r || 1); o = j.at; }
-            const edge = gap && (li === Math.ceil(n / 2) - 1 || li === Math.ceil(n / 2));
-            const popped = pose.pop && pose.pop.finger === fi && pose.pop.joint === ji && li === n - 1;
-            if (popped) { o = add(o, [0, 11 * pose.pop.t, 7 * pose.pop.t]); phi -= 0.7 * pose.pop.t; }
-            push(popped ? 5 : under(phi) ? 0 : 3, base * 100 + ji * 10 + 7 + li * 0.1, plate(o, phi, -4.5, 4.5, f.w + 2, p.plateThick, (edge && lit.gaps) || (popped && pose.pop.t > 0.02) ? { lit: true } : {}, 0.6 + li * 0.45));
-          });
+          let o, phi;
+          if (xi < 2) { phi = j.before; o = add(j.at, mul(axisOf(j.before, psi), xi - 2)); }
+          else if (xi > 2 + arc) { phi = j.after; o = add(j.at, mul(axisOf(j.after, psi), xi - 2 - arc)); }
+          else { phi = j.before + (xi - 2) / (r || 1); o = j.at; }
+          const edge = gap && (li === Math.ceil(n / 2) - 1 || li === Math.ceil(n / 2));
+          const popped = pose.pop && pose.pop.finger === fi && pose.pop.joint === ji && li === n - 1;
+          if (popped) { o = add(o, [0, 11 * pose.pop.t, 7 * pose.pop.t]); phi -= 0.7 * pose.pop.t; }
+          push(popped ? 5 : under(phi) ? 0 : 3, base * 100 + ji * 10 + 7 + li * 0.1, plate(frame(o, phi, psi), -4.5, 4.5, lw, lw * 0.96, half, half, p.plateThick, (edge && lit.gaps) || (popped && pose.pop.t > 0.02) ? { lit: true } : {}, 0.6 + li * 0.45));
         });
-      }
+      });
     });
-    const T = M.THUMB;
-    const ta = [Math.cos(T.spread), Math.sin(T.spread), 0];
-    const tUp = [0, 0, 1];
-    const tf = (o) => G.frameOf(o, ta, G.cross3(tUp, ta), tUp);
-    let tp = [T.x, T.y, Z0 - 3];
-    T.bones.forEach((bone, bi) => {
-      push(4, 900 + bi * 10, S(G.sphereOf(tp, T.w * 0.4, P, { steps: 28 }), { tone: "lo" }) + S(G.prismOf(tf(tp), rounded(T.w, M.SEG_THICK + 1, 6), 1.8, bone - 1.8, P), { tone: "lo", crease: "faint" }));
+
+    // Thumb: thenar pad around the metacarpal, then proximal and distal phalanges with plates.
+    const close = pose.flex && !Array.isArray(pose.flex) ? Math.min(1, pose.flex.mcp / (Math.PI / 2)) : 0;
+    const tfs = thumbFrames(close);
+    tfs.forEach(({ F, len }, bi) => {
+      const [[w0, h0], [w1, h1]] = THUMB_SIZE[bi];
+      const joint = bi > 0 ? S(G.sphereOf(F.o, w0 * 0.47, P, { steps: 28 }), { tone: "lo" }) : "";
+      push(bi === 0 ? 0 : 4, 900 + bi * 10, joint + S(segmentLoft(F, len, w0, h0, w1, h1, bi === 2, bi === 0 ? 0.5 : 0.44), { tone: "lo", crease: "none" }));
+      if (bi === 0) return;
+      const pb = bi - 1;
       const travel = D0.thumb * deployed.thumb.reach;
-      const home = 30 + T.bones.slice(0, bi).reduce((a, b) => a + b, 0);
-      const len = bone - 4;
-      const end = Math.min(home + 2 + len, travel) - home;
-      const start = Math.max(end - len, -home + 2);
-      if (end - start > 0.8 && end > -20) push(4, 900 + bi * 10 + 5, S(G.prismOf(tf(tp), shell(T.w + 3, p.plateThick), Math.max(start, 2), Math.max(end, 2.6), P), { tone: "hi", crease: "lo" }));
-      tp = add(tp, mul(ta, bone));
+      const home = 30 + T.bones.slice(0, pb).reduce((a, b) => a + b, 0);
+      const plen = T.bones[pb] - 4 - (bi === 2 ? 3 : 0);
+      const end = Math.min(home + 2 + plen, travel) - home;
+      const start = Math.max(end - plen, -home + 2);
+      if (end - start > 0.8 && end > -20) {
+        const s0 = Math.max(start, 2), s1 = Math.max(end, 2.6);
+        const t0 = s0 / len, t1 = s1 / len;
+        const wa = w0 + (w1 - w0) * t0, wb = w0 + (w1 - w0) * t1;
+        const ha = h0 + (h1 - h0) * t0, hb = h0 + (h1 - h0) * t1;
+        push(4, 900 + bi * 10 + 5, plate(F, s0, s1, wa + 2.4, wb + 2.4, ha / 2, hb / 2, p.plateThick));
+      }
     });
     return items;
   }

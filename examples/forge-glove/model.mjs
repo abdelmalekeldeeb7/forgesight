@@ -53,7 +53,7 @@ export const FINGERS = [
 // Thumb: carpometacarpal joint low on the radial side of the palm, 12 mm past the
 // wrist crease. The metacarpal is buried in the thenar pad; the two phalanges carry plates.
 // Directions are [yaw from the forearm axis toward the thumb side, pitch toward the palm], rad.
-export const THUMB = { y: 36, x: -6, w: 20, bones: [36, 30], spread: 0.6, cmc: [-28, 22, -7], meta: 44, dirs: [[0.62, 0.42], [0.3, 0.32], [0.12, 0.28]], roll: -0.95 };
+export const THUMB = { y: 36, x: -6, w: 20, bones: [36, 30], spread: 0.6, cmc: [-26, 14, -9], meta: 44, dirs: [[0.48, 0.4], [0.2, 0.02], [0.0, -0.14]], roll: -0.8 };
 export const PALM = { x0: -40, x1: 60, half: 43, thick: 26 };
 export const CUFF = { x0: -96, x1: -40, r: 36, rIn: 28 };
 export const SEG_THICK = 16;
