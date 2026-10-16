@@ -40,13 +40,20 @@ export const CONTROLS = {
 export const MARGIN = { knock: 2 };
 export const PENDULUM = { mass: 2, arm: 0.115, strike: Math.atan2(80, 83) };
 
+// Knuckles sit on an arc (middle furthest out, little furthest back) and on the
+// transverse metacarpal arch (middle highest); fingers splay slightly and taper.
+// Bone lengths are joint-to-joint (distal includes the pad). After Buryanov &
+// Kotiuk 2010 phalanx ratios, scaled to the 190 mm hand.
 export const FINGERS = [
-  { name: "index", y: 32, w: 17, mcp: 58, bones: [40, 24, 20] },
-  { name: "middle", y: 11, w: 17.5, mcp: 62, bones: [45, 28, 21] },
-  { name: "ring", y: -10, w: 16.5, mcp: 60, bones: [42, 27, 21] },
-  { name: "little", y: -30, w: 14.5, mcp: 54, bones: [33, 19, 18] },
+  { name: "index", y: 29, z: -1.5, splay: 0.07, w: 19, mcp: 58, bones: [40, 24, 20] },
+  { name: "middle", y: 9, z: 0, splay: 0, w: 19.5, mcp: 62, bones: [45, 28, 21] },
+  { name: "ring", y: -10, z: -1.5, splay: -0.06, w: 18, mcp: 58, bones: [42, 27, 21] },
+  { name: "little", y: -28, z: -5, splay: -0.15, w: 15.5, mcp: 47, bones: [33, 19, 18] },
 ];
-export const THUMB = { y: 36, x: -6, w: 20, bones: [36, 30], spread: 0.6 };
+// Thumb: carpometacarpal joint low on the radial side of the palm, 12 mm past the
+// wrist crease. The metacarpal is buried in the thenar pad; the two phalanges carry plates.
+// Directions are [yaw from the forearm axis toward the thumb side, pitch toward the palm], rad.
+export const THUMB = { y: 36, x: -6, w: 20, bones: [36, 30], spread: 0.6, cmc: [-28, 22, -7], meta: 44, dirs: [[0.62, 0.42], [0.3, 0.32], [0.12, 0.28]], roll: -0.95 };
 export const PALM = { x0: -40, x1: 60, half: 43, thick: 26 };
 export const CUFF = { x0: -96, x1: -40, r: 36, rIn: 28 };
 export const SEG_THICK = 16;
