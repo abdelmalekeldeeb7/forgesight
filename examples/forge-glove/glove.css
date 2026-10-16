@@ -40,3 +40,24 @@
 @media (max-width: 640px) { .fg .iso-plate { padding: 42px 6px 56px; } .fg-act { font-size: 12px; } }
 .fg-card-words { margin: 8px 4px 0; font-size: 12px; color: var(--anatomy-muted); line-height: 1.5; }
 .fg-card { overflow: hidden; } .fg-card svg { overflow: hidden; }
+/* Mark 85 colours: red shells, gold knuckle guards, joints and repulsor housing. Failure highlights (data-lit) keep the kit's colours. */
+.fg { --im-red-0:#2b0f0d; --im-red-1:#36130f; --im-red-2:#421813; --im-red-3:#501d17; --im-red-top:#62241c; --im-red-fill:#3a1411;
+  --im-gold-0:#2a2211; --im-gold-1:#352b15; --im-gold-2:#41351a; --im-gold-3:#4f411f; --im-gold-top:#625127; --im-gold-fill:#3a3017;
+  --im-lens:#0d1a20; --im-glow:#bff0ff; }
+[data-theme="light"] .fg { --im-red-0:#9e2f27; --im-red-1:#b0382f; --im-red-2:#c24339; --im-red-3:#d05046; --im-red-top:#dc6157; --im-red-fill:#c24339;
+  --im-gold-0:#b48f3c; --im-gold-1:#c49e4a; --im-gold-2:#d3ae5b; --im-gold-3:#dfbd6e; --im-gold-top:#e8ca82; --im-gold-fill:#d3ae5b;
+  --im-lens:#cfe9f2; --im-glow:#5fd0ff; }
+.im-red:not([data-lit]) > .iso-fill { fill: var(--im-red-fill); }
+.im-red:not([data-lit]) > .iso-shade[data-shade="0"] { fill: var(--im-red-0); }
+.im-red:not([data-lit]) > .iso-shade[data-shade="1"] { fill: var(--im-red-1); }
+.im-red:not([data-lit]) > .iso-shade[data-shade="2"] { fill: var(--im-red-2); }
+.im-red:not([data-lit]) > .iso-shade[data-shade="3"] { fill: var(--im-red-3); }
+.im-red:not([data-lit]) > .iso-top { fill: var(--im-red-top); }
+.im-gold:not([data-lit]) > .iso-fill { fill: var(--im-gold-fill); }
+.im-gold:not([data-lit]) > .iso-shade[data-shade="0"] { fill: var(--im-gold-0); }
+.im-gold:not([data-lit]) > .iso-shade[data-shade="1"] { fill: var(--im-gold-1); }
+.im-gold:not([data-lit]) > .iso-shade[data-shade="2"] { fill: var(--im-gold-2); }
+.im-gold:not([data-lit]) > .iso-shade[data-shade="3"] { fill: var(--im-gold-3); }
+.im-gold:not([data-lit]) > .iso-top { fill: var(--im-gold-top); }
+.im-lens { fill: var(--im-lens); stroke: none; }
+.im-glow { fill: var(--im-glow); stroke: none; filter: drop-shadow(0 0 4px var(--fg-led)) drop-shadow(0 0 10px var(--fg-led)); }

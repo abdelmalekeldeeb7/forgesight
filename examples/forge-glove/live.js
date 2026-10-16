@@ -31,6 +31,9 @@ const NAMES = Object.fromEntries(M.SCENARIOS.map((s) => [s.id, s.name]));
 const FLEX = { mcp: (M.DATA.flexion.mcp * Math.PI) / 180, pip: (M.DATA.flexion.pip * Math.PI) / 180, dip: (M.DATA.flexion.dip * Math.PI) / 180 };
 const BENT = { mcp: 0.18, pip: 1.15, dip: 0.6 };
 const STRAIGHT = { mcp: 0, pip: 0, dip: 0 };
+// End of act 0: the formed hand turns palm-up and the repulsor lights.
+const SHOW_PALM = 2.6;
+const PALM_UP = 1.95;
 
 const LEVER_WORDS = {
   lames: (a, b) => `knuckle lames per joint ${a} → ${b}`,
@@ -40,7 +43,7 @@ const LEVER_WORDS = {
   lameSlide: (a, b) => `lame overlap ${a} → ${b} mm`,
 };
 const WHY = {
-  how: "Three small gear motors in the cuff wind the plates out along rails. The back of the hand forms first, then the fingers, then the thumb; each plate stops on a small magnet in the thin liner glove, so the rest slide past it, like a telescope opening.",
+  how: "Three small gear motors in the cuff wind the plates out along rails. The back of the hand forms first, then the fingers, then the thumb; each plate stops on a small magnet in the thin liner glove, so the rest slide past it, like a telescope opening. Then the hand turns over to show the palm repulsor: in this build it is a ring of LEDs behind a lens, a light and not a thruster, and it is not yet counted in the weight or the battery.",
   unfold: "The speed comes from the motor's datasheet (310 rpm with no load) slowed by the drag of every plate it pushes.",
   fist: "Closing a fist stretches the back of each knuckle. Each lame (a small overlapping plate, like the scales of a medieval gauntlet) can slide about 8 mm before it uncovers what's under it. The big knuckle stretches about 18 mm.",
   pinch: "If a finger is still bent while the glove forms, a plate edge pushes into it. Pain depends on pressure, the push spread over the area it touches, and a 1.6 mm plate edge concentrates it.",
@@ -100,7 +103,7 @@ function markActs() {
 function durationOf(id, m) {
   const slow = m === "slow" ? 3 : 1;
   if (m === "fix") return 2.2;
-  if (id === "how") return M.deployOf(params).time / 0.45 + 2.4;
+  if (id === "how") return M.deployOf(params).time / 0.45 + 2.4 + SHOW_PALM;
   if (id === "unfold") return M.deployOf(params).time + 2;
   if (id === "fist") return (1.1 * slow) + 2.2;
   if (id === "pinch") return M.deployOf(params).time * slow + 2.4;
@@ -139,6 +142,11 @@ function frameOf(id, m, t) {
     const open = ease(t / 0.35);
     out.cuff = [open, Math.min(open, 1 - ease((t - M.deployOf(params).time / speed - 0.6) / 0.8))];
     out.pose = { deploy: deployAt(t, speed) };
+    if (id === "how") {
+      const r = t - (M.deployOf(params).time / speed + 1.4);
+      out.pose.roll = PALM_UP * ease(r / 1.1);
+      out.pose.glow = ease((r - 1.0) / 0.5);
+    }
     return out;
   }
   if (id === "fist") {
