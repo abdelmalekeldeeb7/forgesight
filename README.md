@@ -19,7 +19,7 @@ Needs Node.js 20.10+, and Chrome or Chromium for the checks. No npm install.
 
 ## Examples
 
-- `examples/forge-glove/`: the first Forge show. A wrist cuff unfolds into an armoured glove on a test bench. Data was gathered with sources, and `validate.mjs` checks the model. There are five tests, three of which fail on the first design and get fixed by turning the knobs on the bench. Build it with `node examples/forge-glove/build.mjs` (add `--light` or `--artifact`). The visuals are a first pass and are being rebuilt on the 3D mode.
+- `examples/forge-glove/`: the first Forge show. A wrist cuff unfolds into an armoured glove, styled after Iron Man's Mark 85, on a test bench. Its palm repulsor is translated into a real spotlight (a Cree XP-L LED behind a Carclo narrow-spot lens). Data was gathered with sources, and `validate.mjs` checks the model. There are seven tests, including firing the beam at a light meter and holding it on against the skin burn limit; four fail on the first design and get fixed by turning the knobs on the bench. Build it with `node examples/forge-glove/build.mjs` (add `--light` or `--artifact`). The visuals are a first pass and are being rebuilt on the 3D mode.
 - `examples/rocket-engine/`: a validated rocket-engine model (Merlin 1D and Raptor 2 within about 1%). Its show is not built yet.
 - Anatomy's eight Explain examples: `dial-indicator`, `desk-computer`, `arcade-cabinet`, `raptor-engine`, `ripple-tank`, `test-rig`, `spot-plate`, `turning-dial`.
 

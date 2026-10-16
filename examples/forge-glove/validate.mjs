@@ -16,6 +16,13 @@ const mass = M.massOf(M.PARAMS);
 near("Battery share of the glove, g", mass.parts.battery, 25, 0.001, "PICHLER FliteZone 500 2S: 25 g");
 const day = M.stateOf(M.PARAMS, "day");
 near("Standby on 500 mAh 2S at 2 mA/3.8 V (80% usable), h", day.standby, (0.5 * 7.4 * 0.8) / (0.002 * 3.8), 0.001, "XIAO ESP32-S3 light sleep, 2S LiPo 500 mAh");
+const atRef = M.beamOf({ ...M.PARAMS, beamCurrent: 1.05 });
+near("Beam peak at 1050 mA, cd (V6 flux × optic cd/lm)", atRef.candela, 480 * 7.8, 0.001, "Cree XP-L V6 480 lm at 1050 mA × Carclo 10003 7.8 cd/lm");
+near("ANSI FL1 throw of a 10,000 cd beam, m", M.beamOf({ ...M.PARAMS, beamCurrent: 1.05 }).throwM * Math.sqrt(10000 / atRef.candela), 200, 0.001, "ANSI/PLATO FL 1: 0.25 lux at √(10000/0.25) = 200 m");
+const still = M.heatOf(M.PARAMS, 60, { h: 1e-9 });
+near("Housing with no cooling after 60 s, °C (adiabatic: T0 + P·t / m·c)", still.temp, 33 + (still.heat * 60) / (M.PARAMS.spreader * 0.896), 0.001, "Energy balance, 6061 aluminium c = 0.896 J/g·K");
+const settled = M.heatOf(M.PARAMS, 1e6, { ambient: 25 });
+near("Housing after a very long time, °C (steady: T_air + P / hA)", settled.temp, 25 + settled.heat / (10 * M.PARAMS.housingArea * 1e-4), 0.001, "Newton cooling, h = 10 W/m²K");
 
 for (const row of rows) console.log(row.ok ? "ok  " : "FAIL", row.label.padEnd(58), row.got.toFixed(2).padStart(9), "vs", String(row.want.toFixed(2)).padStart(9), " ·", row.source);
 console.log("\nCampaign, first design:");

@@ -251,7 +251,7 @@ export function makeGlove(k, G, M, P, Z0) {
   function needle(g, share, top0) {
     const a = -2.1 + 4.2 * share;
     const top = top0 + 3.2;
-    return `<path class="iso-line" data-tone="lit" data-free="start" d="${k.lineOnTop([g.x - Math.sin(a) * 2, g.y + Math.cos(a) * 2], [g.x + Math.sin(a) * (g.r - 3), g.y - Math.cos(a) * (g.r - 3)], top, P)}" style="stroke-width:1"/>` + L(k.ring(g.x, g.y, 1.2, top, P, 12), { tone: "mid" });
+    return `<path class="iso-line" data-tone="lit" data-free="" d="${k.lineOnTop([g.x - Math.sin(a) * 2, g.y + Math.cos(a) * 2], [g.x + Math.sin(a) * (g.r - 3), g.y - Math.cos(a) * (g.r - 3)], top, P)}" style="stroke-width:1"/>` + L(k.ring(g.x, g.y, 1.2, top, P, 12), { tone: "mid" });
   }
   function pendulum(pivot, armLen, alpha, lit) {
     const d = [0, Math.sin(alpha), -Math.cos(alpha)];
@@ -300,14 +300,43 @@ export function makeGlove(k, G, M, P, Z0) {
   // Palm repulsor: a gold housing set into the palm, a lens and a glowing ring. In this
   // build it is an LED ring behind a diffuser, a light rather than a thruster.
   const REPULSOR = { x: 10, y: 2, r: 15 };
-  function repulsor(glow) {
+  function repulsorFrame() {
     const [, t, , cz] = palmDims(REPULSOR.x);
     const o = [REPULSOR.x, REPULSOR.y, Z0 + cz - t * 0.42 - LINER * 0.25 + 0.6];
-    const F = G.frameOf(o, [0, 0, -1], [1, 0, 0], [0, -1, 0]);
+    return G.frameOf(o, [0, 0, -1], [1, 0, 0], [0, -1, 0]);
+  }
+  // The beam: a cone from the lens, opening at the optic's true half-angle (FWHM / 2),
+  // to `reach` mm or onto the surface it lands on. Brighter core cones sit inside.
+  const HALF_ANGLE = ((M.DATA.optic.fwhm / 2) * Math.PI) / 180;
+  let beamId = 0;
+  function beam(power, reach, lands = false) {
+    if (power <= 0.01) return "";
+    const F = repulsorFrame();
+    const ring = (r, s, n = 36) => Array.from({ length: n }, (_, i) => R(place(F, s, [r * Math.cos((i / n) * 2 * Math.PI), r * Math.sin((i / n) * 2 * Math.PI)])));
+    const cone = (r0, spread, len) => k.pathOf(G.hullOf([...ring(r0, 3), ...ring(r0 + len * Math.tan(spread), 3 + len)].map((q) => k.iso(q, P))), true);
+    const out = [];
+    // In open air the beam fades along its length; landing on a surface it ends in a spot.
+    let fill = "";
+    if (!lands) {
+      const a = k.iso(R(place(F, 3, [0, 0])), P), b = k.iso(R(place(F, 3 + reach, [0, 0])), P);
+      const id = `im-fade-${beamId++}`;
+      out.push(`<defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}"><stop offset="0" class="im-stop" style="stop-opacity:1"/><stop offset="0.55" class="im-stop" style="stop-opacity:0.45"/><stop offset="1" class="im-stop" style="stop-opacity:0"/></linearGradient></defs>`);
+      fill = ` fill="url(#${id})"`;
+    }
+    [[9, HALF_ANGLE, 0.16], [6.5, HALF_ANGLE * 0.7, 0.2], [4, HALF_ANGLE * 0.45, 0.28]].forEach(([r0, spread, a]) => out.push(`<path class="im-beam"${fill} d="${cone(r0, spread, reach)}" style="opacity:${(a * power * (lands ? 1 : 2)).toFixed(3)}${fill ? ";fill:url(#" + fill.match(/#([^)]+)/)[1] + ")" : ""}"/>`));
+    if (lands) {
+      const far = ring(9 + reach * Math.tan(HALF_ANGLE), 3 + reach).map((q) => k.iso(q, P));
+      out.push(`<path class="im-glow" d="${k.pathOf(far, true)}" style="opacity:${(0.55 * power).toFixed(3)}"/>`);
+    }
+    return out.join("");
+  }
+  function repulsor(glow, hot = false) {
+    const F = repulsorFrame();
+    const o = F.o;
     if (G.dot3(G.unit3(sub(R(add(o, F.a)), R(o))), V) < 0.08) return "";
     const circle = (r, s, n = 40) => Array.from({ length: n }, (_, i) => place(F, s, [r * Math.cos((i / n) * 2 * Math.PI), r * Math.sin((i / n) * 2 * Math.PI)]));
     const flatAt = (pts) => k.pathOf(pts.map(at), true);
-    const housing = S(loftOf([circle(REPULSOR.r, -1.5), circle(REPULSOR.r, 1.2), circle(REPULSOR.r - 2, 2.6)]), { tone: "hi", crease: "lo", className: "im-gold" });
+    const housing = S(loftOf([circle(REPULSOR.r, -1.5), circle(REPULSOR.r, 1.2), circle(REPULSOR.r - 2, 2.6)]), { tone: "hi", crease: "lo", className: "im-gold", lit: hot });
     const lens = `<path class="im-lens" d="${flatAt(circle(10.5, 2.7))}"/>`;
     const core = `<path class="im-glow" d="${flatAt(circle(9, 2.8))}" style="opacity:${glow.toFixed(3)}"/>`;
     const ring = `<path class="fg-led" d="${flatAt(circle(11.6, 2.75))}" style="opacity:${(0.25 + 0.75 * glow).toFixed(3)}"/>`;
@@ -331,8 +360,10 @@ export function makeGlove(k, G, M, P, Z0) {
     const flip = Math.cos(ROLL) < 0;
     push(1, 0, palm());
     const glow = pose.glow ?? 0;
-    const rep = repulsor(glow);
+    const rep = repulsor(glow, pose.hot);
     if (rep) push(1.8, 0, rep);
+    // The beam is drawn in front when the palm faces the viewer, else behind the hand.
+    if (pose.beam) push(flip ? 6 : -1, 0, beam(pose.beam, pose.reach ?? 140, !!pose.lands));
 
     // Back plates: shells that follow the dome of the hand, sliding out of the cuff.
     const backs = plates.filter((q) => q.kind === "back");
@@ -351,7 +382,7 @@ export function makeGlove(k, G, M, P, Z0) {
       // Panel lines: a spine down the middle and a chevron either side, as on the Mark 85.
       const outer = lift + p.plateThick + 0.2;
       const surf = (x, a) => palmSection(x, outer, a, a, 2, 7 - i)[0];
-      const run = (a0, a1) => { const pts = []; for (let t = 0; t <= 1.0001; t += 0.2) { const x = start + 3 + (end - start - 6) * t; pts.push(at(surf(x, a0 + (a1 - a0) * t))); } return k.pathOf(pts); };
+      const run = (a0, a1) => { const pts = []; for (let t = 0; t <= 1.0001; t += 0.2) { const x = start + 0.2 + (end - start - 0.4) * t; pts.push(at(surf(x, a0 + (a1 - a0) * t))); } return k.pathOf(pts); };
       const lines = end - start > 14 ? L(run(Math.PI / 2, Math.PI / 2), { tone: "lo" }) + L(run(Math.PI / 2 - 0.12, Math.PI / 2 - 0.5) + run(Math.PI / 2 + 0.12, Math.PI / 2 + 0.5), { tone: "faint" }) : "";
       push(flip ? 0.5 : 2, i, S(loftOf(rings), { tone: "hi", crease: "lo", className: "im-red", inner: lines }) + (end - start > 20 ? D([at(section(start + 4, outer)[3]), at(section(start + 4, outer)[10])], { size: 0.4, tone: "mid" }) : ""));
     });
@@ -466,5 +497,6 @@ export function makeGlove(k, G, M, P, Z0) {
     }
   }
 
-  return { hand, cuff, forearm, strap, palm, fingerChain, rounded, shell, palmRunOf, knob, needle, pendulum, RIDE };
+  const lensHeight = () => repulsorFrame().o[2];
+  return { hand, lensHeight, cuff, forearm, strap, palm, fingerChain, rounded, shell, palmRunOf, knob, needle, pendulum, RIDE };
 }

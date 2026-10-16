@@ -49,6 +49,7 @@ The core edge is the delivery: showing that an AI model, through a skill, MCP se
 
 ## Status (2026-10-15)
 - Anatomy is merged in: one skill, two modes (Explain and Forge), installed at ~/.claude/skills/forgesight.
-- **First complete Forge show:** `examples/forge-glove/` (the cuff-to-glove request). Data gathered live with sources, a checked model, five tests (three fail on the first design), fixes applied by turning the knobs on the bench, an illustrated summary, dark and light themes.
+- **First complete Forge show:** `examples/forge-glove/` (the cuff-to-glove request), now an anatomical hand in Mark 85 styling with a palm repulsor translated into a real LED spotlight. Data gathered live with sources, a checked model, seven tests (four fail on the first design, including the beam overheating the palm at 3 A), fixes applied by turning the knobs on the bench, an illustrated summary, dark and light themes.
+- Repulsor data still to confirm: the XP-L's flux and Vf above 1050 mA (droop assumed), and the ISO 13732-1 thresholds against the standard itself. Eye safety (IEC 62471) is not modelled.
 - `examples/rocket-engine/model.mjs` is a validated model whose stage and show are still to be built.
 - Not yet done: turning and taking the object apart (inspect), a geometry audit for the glove, a confirmed finger pain-pressure limit.

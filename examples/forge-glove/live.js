@@ -2,6 +2,7 @@ const D = __DATA__;
 const P = D.P;
 const KIT = { slabOf, solidSvg, lineSvg, dotsSvg, iso, depthOf, sideSeam, planOutline, insetPlan, corners, cylinder, knurl, ring, lineOnTop, pathOf };
 const glove = GLOVE.makeGlove(KIT, G, M, P, D.Z0);
+const GLOVE_LENS = glove.lensHeight();
 const root = document.querySelector(".fg");
 const stage = root.querySelector(".fg-stage");
 const svg = stage.querySelector("svg");
@@ -34,6 +35,8 @@ const STRAIGHT = { mcp: 0, pip: 0, dip: 0 };
 // End of act 0: the formed hand turns palm-up and the repulsor lights.
 const SHOW_PALM = 2.6;
 const PALM_UP = 1.95;
+// "Hold it on" plays the minute 13× faster.
+const HEAT_PLAY = 4.6;
 
 const LEVER_WORDS = {
   lames: (a, b) => `knuckle lames per joint ${a} → ${b}`,
@@ -41,6 +44,8 @@ const LEVER_WORDS = {
   pins: (a, b) => `hinge pins ${M.CONTROLS.pins.names[a]} → ${M.CONTROLS.pins.names[b]}`,
   pinD: (a, b) => `pin diameter ${a} → ${b} mm`,
   lameSlide: (a, b) => `lame overlap ${a} → ${b} mm`,
+  beamCurrent: (a, b) => `beam power ${a} → ${b} A`,
+  spreader: (a, b) => `heat spreader ${a} → ${b} g of aluminium`,
 };
 const WHY = {
   how: "Three small gear motors in the cuff wind the plates out along rails. The back of the hand forms first, then the fingers, then the thumb; each plate stops on a small magnet in the thin liner glove, so the rest slide past it, like a telescope opening. Then the hand turns over to show the palm repulsor: in this build it is a ring of LEDs behind a lens, a light and not a thruster, and it is not yet counted in the weight or the battery.",
@@ -48,7 +53,9 @@ const WHY = {
   fist: "Closing a fist stretches the back of each knuckle. Each lame (a small overlapping plate, like the scales of a medieval gauntlet) can slide about 8 mm before it uncovers what's under it. The big knuckle stretches about 18 mm.",
   pinch: "If a finger is still bent while the glove forms, a plate edge pushes into it. Pain depends on pressure, the push spread over the area it touches, and a 1.6 mm plate edge concentrates it.",
   knock: "The pendulum hits the knuckle with the same energy as a hand knocking a table edge at 2 m/s (1.2 J). A glancing knock tries to shear the tiny pins that hinge each lame. Printed plastic is weakest between its layers.",
-  day: "Weight on the wrist, how long the battery lasts on standby, and how many times the glove can form on one charge.",
+  beam: "The repulsor, made real: a Cree XP-L LED behind a 20 mm Carclo narrow-spot lens. The lens squeezes the light into a 17° beam, and the brightness at its centre (in candela) sets how far it reaches: beam distance is where it fades to 0.25 lux, about full moonlight (the ANSI FL1 flashlight rule).",
+  heat: "An LED turns only about a third of its power into light; the rest is heat, and it goes into a small aluminium spreader in the palm. Still air carries little of it away in a minute, so the spreader warms almost like a pan on a stove. Bare metal held against skin for a minute burns above 51 °C (EN ISO 13732-1). The liner glove is ignored, so this is the hot side of the truth. Shown 13× faster.",
+  day: "Weight on the wrist, how long the battery lasts on standby, how many times the glove can form on one charge, and how many minutes of beam it gives.",
 };
 const UNITS = "N = newtons, a measure of force: 10 N is about the weight of a 1 kg bag. N/cm² is force per square centimetre.";
 
@@ -67,7 +74,7 @@ let pend = null;
 
 function tourSteps() {
   const steps = [{ act: "how" }, { act: "unfold" }];
-  for (const id of ["fist", "pinch", "knock"]) {
+  for (const id of ["fist", "pinch", "knock", "beam", "heat"]) {
     steps.push({ act: id });
     const fix = FIXES.find((f) => f.act === id);
     if (fix) steps.push({ act: id, mode: "slow" }, { act: id, mode: "fix", fix }, { act: id });
@@ -109,6 +116,8 @@ function durationOf(id, m) {
   if (id === "pinch") return M.deployOf(params).time * slow + 2.4;
   if (id === "knock") return 1.6 * slow + 2;
   if (id === "day") return 5;
+  if (id === "beam") return 4.2 * (m === "slow" ? 1.5 : 1);
+  if (id === "heat") return HEAT_PLAY + 2.2;
   return 6;
 }
 
@@ -178,6 +187,20 @@ function frameOf(id, m, t) {
     out.pose = { deploy: FORMED, pop: fails && p.hit >= 0 ? { finger: 1, joint: 0, t: ease(p.hit / 0.25) } : null };
     return out;
   }
+  if (id === "beam") {
+    const on = ease((t * slow - 0.6) / 0.6);
+    out.pose = { deploy: FORMED, beam: on * Math.min(1, M.beamOf(params).flux / 1200 + 0.35), reach: GLOVE_LENS - D.METER_TOP, lands: true, glow: on };
+    return out;
+  }
+  if (id === "heat") {
+    const s = M.stateOf(params, "heat");
+    const up = ease((t - 0.2) / 0.9);
+    const run = clamp((t - 1.2) / (HEAT_PLAY - 1.2), 0, 1);
+    const temp = M.heatOf(params, run * s.seconds).temp;
+    out.pose = { deploy: FORMED, roll: PALM_UP * up, glow: ease((t - 0.9) / 0.4), beam: ease((t - 1.0) / 0.4) * Math.min(1, M.beamOf(params).flux / 1200 + 0.35), reach: 150, hot: run > 0 && temp > M.DATA.burn.metal1min };
+    out.gauge = 1 - (run * s.seconds) / 60 / M.stateOf(params, "day").beamMin;
+    return out;
+  }
   if (id === "day") {
     const s = M.stateOf(params, "day");
     const used = 16 / s.standby + 20 / s.forms;
@@ -233,7 +256,7 @@ function caption() {
   if (act === "fist" && mode === "slow") lines.push("Replayed at one-third speed.");
   return lines.join(" ");
 }
-const SPREAD = { fist: "Across realistic hand sizes and fists", pinch: "Across motor-to-motor variation (±20%)", knock: "Across knock speeds from 1.5 to 3 m/s and print quality" };
+const SPREAD = { beam: "Across how the LED's output falls off at high current", heat: "Across air from 20 to 35 °C, still to breezy air, and the LED's real efficiency", fist: "Across realistic hand sizes and fists", pinch: "Across motor-to-motor variation (±20%)", knock: "Across knock speeds from 1.5 to 3 m/s and print quality" };
 const fmtMark = (c) => c.id === "gap" ? "no gap" : (c.unit === "×" ? `${c.mark}×` : `${c.mark}${c.unit ? " " + c.unit : ""}`);
 const fmtRange = (c) => (c.unit === "×" ? `${c.range.low.toFixed(1)}–${c.range.high.toFixed(1)}×` : `${c.range.low.toFixed(c.unit === "mm" ? 1 : 0)}–${c.range.high.toFixed(c.unit === "mm" ? 1 : 0)} ${c.unit}`);
 
@@ -329,8 +352,8 @@ for (const [key, el] of Object.entries(knobEls)) {
 }
 for (const button of actButtons) button.addEventListener("click", () => { takeOver(); start(button.dataset.act, "play"); });
 stage.addEventListener("keydown", (event) => {
-  const ids = ["how", "unfold", "fist", "pinch", "knock", "day"];
-  if (/^[0-5]$/.test(event.key)) { takeOver(); start(ids[Number(event.key)]); event.preventDefault(); }
+  const ids = ["how", "unfold", "fist", "pinch", "knock", "beam", "heat", "day"];
+  if (/^[0-7]$/.test(event.key)) { takeOver(); start(ids[Number(event.key)]); event.preventDefault(); }
   if (event.key === "s" || event.key === "S") { takeOver(); start("summary"); }
   if (event.key === "r" || event.key === "R") { takeOver(); reset(false); start("how"); }
   if (event.key === "f" || event.key === "F") {
@@ -364,12 +387,12 @@ function renderSummary() {
   const cards = runs.map((run, i) => {
     const status = statusOf(run.id);
     const w = (run.checks.find((c) => c.status !== "holds") ?? run.checks[0]).words;
-    return `<div class="fg-card"><div class="iso-plate-corners" aria-hidden="true"><span class="iso-plate-corner" data-corner="fig">Fig 1${"abcde"[i]}</span><span class="iso-plate-corner" data-corner="title">${run.name}</span><span class="iso-plate-corner" data-corner="hint">${status || run.status}</span><span class="iso-plate-corner" data-corner="readout">${run.checks[0].text}</span></div>${cardSvg(run.id)}<p class="fg-card-words">${w[0].toUpperCase() + w.slice(1)}.</p></div>`;
+    return `<div class="fg-card"><div class="iso-plate-corners" aria-hidden="true"><span class="iso-plate-corner" data-corner="fig">Fig 1${"abcdefg"[i]}</span><span class="iso-plate-corner" data-corner="title">${run.name}</span><span class="iso-plate-corner" data-corner="hint">${status || run.status}</span><span class="iso-plate-corner" data-corner="readout">${run.checks[0].text}</span></div>${cardSvg(run.id)}<p class="fg-card-words">${w[0].toUpperCase() + w.slice(1)}.</p></div>`;
   });
   const bad = runs.filter((r) => r.status !== "holds");
-  const verdict = bad.length ? `<b>Not there yet.</b> ${bad.map((r) => r.name).join(", ")} still ${bad.length > 1 ? "fail" : "fails"}. Turn the knobs, or press F on an act to let Forgesight fix it.` : `<b>It works.</b> Fast: forms in ${summary.deploy.toFixed(1)} s. Efficient: about ${Math.round(summary.forms / 100) * 100} forms per charge and ${Math.round(summary.standby)} h on standby. Reliable: survives a full fist, a finger in the way and a knock on a table. Weight ${Math.round(summary.mass)} g.`;
+  const verdict = bad.length ? `<b>Not there yet.</b> ${bad.map((r) => r.name).join(", ")} still ${bad.length > 1 ? "fail" : "fails"}. Turn the knobs, or press F on an act to let Forgesight fix it.` : `<b>It works.</b> Fast: forms in ${summary.deploy.toFixed(1)} s. Efficient: about ${Math.round(summary.forms / 100) * 100} forms per charge and ${Math.round(summary.standby)} h on standby. Reliable: survives a full fist, a finger in the way and a knock on a table. The palm beam reaches ${Math.round(M.beamOf(params).throwM)} m and stays under the burn limit for a full minute, with about ${Math.round(M.stateOf(params, "day").beamMin)} min of beam per charge. Weight ${Math.round(summary.mass)} g.`;
   const fixes = history.length ? `<b>What was fixed:</b> ${history.map((f) => `${NAMES[f.act]}: ${LEVER_WORDS[f.key](f.from, f.to)}`).join("; ")}.` : "";
-  summaryEl.innerHTML = `<div class="fg-cards">${cards.join("")}</div><div class="fg-verdict"><span>${verdict}</span><span>${fixes}</span><span><b>How sure:</b> medium overall. The motor, pins and impact numbers come from datasheets and ISO/TS 15066; the finger pain-pressure limit (190 N/cm²) is quoted from memory and not yet confirmed, and the comfort weight limit is a rule of thumb. Plates sliding on rails is the least certain part: build it and test it first.</span><span><b>Build it in four stages:</b> ① one finger with its lames on a single motor; ② the three back plates; ③ the cuff, latches and the force stop; ④ the full glove. <b>Parts:</b> 3 × Pololu 100:1 HP micro gearmotors, Seeed XIAO ESP32-S3, 2S 500 mAh LiPo, 2 mm steel dowel pins, 5 × 2 mm magnets, PETG filament, a thin liner glove.</span><span><b>Before trusting it:</b> run one finger 100 times, check the force stop on your own finger at the lowest setting first, and knock the knuckle on a padded edge before a hard one.</span></div>`;
+  summaryEl.innerHTML = `<div class="fg-cards">${cards.join("")}</div><div class="fg-verdict"><span>${verdict}</span><span>${fixes}</span><span><b>How sure:</b> medium overall. The motor, pins and impact numbers come from datasheets and ISO/TS 15066; the finger pain-pressure limit (190 N/cm²) is quoted from memory and not yet confirmed, and the comfort weight limit is a rule of thumb. The beam's reach rests on Cree and Carclo datasheets (medium); its heat is low confidence, because how the LED's output falls off above 1 A and how much still air cools the palm are assumptions. Plates sliding on rails is the least certain part: build it and test it first.</span><span><b>Build it in four stages:</b> ① one finger with its lames on a single motor; ② the three back plates; ③ the cuff, latches and the force stop; ④ the full glove. <b>Parts:</b> 3 × Pololu 100:1 HP micro gearmotors, Seeed XIAO ESP32-S3, 2S 500 mAh LiPo, 2 mm steel dowel pins, 5 × 2 mm magnets, PETG filament, a thin liner glove; for the repulsor, a Cree XP-L on a 20 mm star, a Carclo 10003 lens, a small buck LED driver and an aluminium heat spreader.</span><span><b>Before trusting it:</b> run one finger 100 times, check the force stop on your own finger at the lowest setting first, and knock the knuckle on a padded edge before a hard one. Run the beam for a minute with a thermocouple on the palm housing before wearing it, and never point it at anyone's eyes: its eye safety (IEC 62471) is not checked here.</span></div>`;
 }
 
 new IntersectionObserver((entries) => { visible = entries[entries.length - 1].isIntersecting; if (visible) run(); }, { rootMargin: "120px 0px" }).observe(stage);

@@ -17,9 +17,9 @@ const Z0 = 96;
 const BENCH = { x: -236, y: -104, w: 396, d: 200, r: 10 };
 const BENCH_H = 14;
 const FOOT_H = 7;
-const PANEL = { x: -222, y: 40, w: 150, d: 50, r: 4 };
+const PANEL = { x: -222, y: 40, w: 180, d: 50, r: 4 };
 const PANEL_H = 14;
-const KNOBS = ["lames", "pins", "forceStop", "plateMaterial"].map((key, i) => ({ key, x: PANEL.x + 20 + i * 30, y: PANEL.y + PANEL.d / 2 + 2 }));
+const KNOBS = ["lames", "pins", "forceStop", "plateMaterial", "beamCurrent"].map((key, i) => ({ key, x: PANEL.x + 20 + i * 30, y: PANEL.y + PANEL.d / 2 + 2 }));
 const GAUGE = { x: PANEL.x + PANEL.w - 18, y: PANEL.y + PANEL.d / 2 + 2, r: 11 };
 const STRIKE = [64, 10, Z0 + 13];
 const PIVOT = [64, -70, Z0 + 96];
@@ -104,6 +104,22 @@ function stand() {
 }
 
 
+// A handheld light meter on the bench under the palm: the beam's target in "Fire the beam".
+const METER = { x: 10, y: 2, r: 17, h: 9 };
+const METER_TOP = METER.h + 4.8;
+function meter() {
+  const { x, y, r, h } = METER;
+  const out = [`<path class="iso-halo" d="${k.haloOf({ x: x - r, y: y - r, w: 2 * r, d: 2 * r, r }, 0, 1, P)}" style="filter:blur(3px)"/>`];
+  out.push(S(k.cylinder(x, y, r, 0, 1.6, P, 48), { tone: "lo" }));
+  out.push(S(k.cylinder(x, y, r - 1, 1.6, h - 1.6, P, 48, 0.6), { tone: "mid", inner: L(k.sideArc(x, y, r - 1, h / 2 + 0.8, P, 32), { tone: "faint" }) }));
+  out.push(L(k.ring(x, y, r - 3.4, h, P, 40), { tone: "faint" }));
+  out.push(Dt([0.4, 2.5, 4.6].map((a) => at([x + (r - 2.2) * Math.cos(a), y + (r - 2.2) * Math.sin(a), h])), { size: 0.42 }));
+  out.push(S(k.cylinder(x, y, 9.5, h, 1.2, P, 40, 0.4), { tone: "mid" }));
+  const F = G.frameOf([x, y, h + 1.2], [0, 0, 1], [1, 0, 0], [0, 1, 0]);
+  out.push(S(G.lathe([[0, 0], [0, 7], [1.6, 6.4, 1], [2.8, 4.6, 1], [3.4, 2.4, 1], [3.6, 0]], F, P), { tone: "hi" }));
+  return out.join("");
+}
+
 function pendulumFrame() {
   const out = [];
   const base = { x: PIVOT[0] - 28, y: PIVOT[1] - 16, w: 56, d: 32, r: 3 };
@@ -130,7 +146,7 @@ function pivotFront() {
 const params = { ...M.PARAMS };
 const restHand = glove.hand({ deploy: { back: 1, fingers: 1, thumb: 1 } }, params);
 
-const back = [bench(), panel(), `<g data-part="knobs">${KNOBS.map((knob) => `<g data-control="${knob.key}" tabindex="-1">${glove.knob(knob, M.CONTROLS[knob.key].values.indexOf(params[knob.key]), M.CONTROLS[knob.key].values.length, PANEL_H)}</g>`).join("")}</g>`, `<g data-part="gauge">${glove.needle(GAUGE, 1, PANEL_H)}</g>`, pendulumFrame(), stand(), glove.forearm(36, 66), glove.strap(66, 78), glove.forearm(78, 206)];
+const back = [bench(), meter(), panel(), `<g data-part="knobs">${KNOBS.map((knob) => `<g data-control="${knob.key}" tabindex="-1">${glove.knob(knob, M.CONTROLS[knob.key].values.indexOf(params[knob.key]), M.CONTROLS[knob.key].values.length, PANEL_H)}</g>`).join("")}</g>`, `<g data-part="gauge">${glove.needle(GAUGE, 1, PANEL_H)}</g>`, pendulumFrame(), stand(), glove.forearm(36, 66), glove.strap(66, 78), glove.forearm(78, 206)];
 const LABEL = "A transforming glove on a test bench. A mannequin forearm rests in a wrist stand, wearing a cuff; armour plates slide out of the cuff and form a glove over the hand, with small overlapping lames over each knuckle. Behind the hand stands a pendulum impact tester; in front, a control panel with four knobs and a battery gauge.";
 const svg = k.figureSvg({
   width: W,
@@ -148,13 +164,13 @@ const unit = (v) => {
 const cropPts = [[-62, -50, Z0 + 32], [-62, 50, Z0 - 32], [172, -45, Z0 - 48], [172, 52, Z0 - 48], [64, -30, Z0 + 46], [150, 46, Z0 + 24]].map(at);
 const CROP = [Math.min(...cropPts.map((q) => q[0])) - 8, Math.min(...cropPts.map((q) => q[1])) - 8];
 CROP.push(Math.max(...cropPts.map((q) => q[0])) + 8 - CROP[0], Math.max(...cropPts.map((q) => q[1])) + 8 - CROP[1]);
-const DATA = { W, H, Z0, P, KNOBS, GAUGE, PANEL_H, PIVOT, STRIKE, ARM, CROP: CROP.map((v) => +v.toFixed(1)) };
+const DATA = { W, H, Z0, P, KNOBS, GAUGE, PANEL_H, PIVOT, STRIKE, ARM, METER_TOP, CROP: CROP.map((v) => +v.toFixed(1)) };
 
 const ACTS = M.SCENARIOS.map((s, i) => `<button type="button" class="fg-act" data-act="${s.id}"><span class="fg-num">${String(i).padStart(2, "0")}</span>${s.name}<span class="fg-mark" aria-hidden="true"></span></button>`).join("") + `<button type="button" class="fg-act" data-act="summary"><span class="fg-num">★</span>Summary<span class="fg-mark" aria-hidden="true"></span></button>`;
 const corners = `<div class="iso-plate-corners" aria-hidden="true"><span class="iso-plate-corner" data-corner="fig">Fig 1</span><span class="iso-plate-corner" data-corner="title" data-title>Cuff to glove</span><span class="iso-plate-corner" data-corner="hint" data-hint>Click an act · turn the knobs</span><span class="iso-plate-corner" data-corner="readout" data-readout>formed in 2.3 s</span></div>`;
-const stage = `<div class="fg-stage" tabindex="0" role="group" aria-label="Glove test bench. Choose an act below, or press the number keys 0 to 5; click a knob on the panel to change the design.">${svg}</div>`;
+const stage = `<div class="fg-stage" tabindex="0" role="group" aria-label="Glove test bench. Choose an act below, or press the number keys 0 to 7; click a knob on the panel to change the design.">${svg}</div>`;
 const summary = `<section class="fg-summary" data-summary hidden></section>`;
-const body = `<figure class="iso-figure fg"><div class="iso-plate">${corners}${stage}</div><figcaption class="iso-legend"><span class="fg-acts">${ACTS}</span><span class="iso-caption" data-caption></span><span class="fg-controls">Knobs on the panel, left to right: knuckle lames per joint · hinge pins · force stop · plate material. The dial shows the battery.</span></figcaption></figure>${summary}`;
+const body = `<figure class="iso-figure fg"><div class="iso-plate">${corners}${stage}</div><figcaption class="iso-legend"><span class="fg-acts">${ACTS}</span><span class="iso-caption" data-caption></span><span class="fg-controls">Knobs on the panel, left to right: knuckle lames per joint · hinge pins · force stop · plate material · beam power. The dial shows the battery.</span></figcaption></figure>${summary}`;
 
 function moduleScript(file, name, deps = "") {
   const src = readFileSync(file, "utf8");

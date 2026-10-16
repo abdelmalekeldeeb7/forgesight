@@ -10,7 +10,18 @@ export const DATA = {
   battery: { mAh: 500, volts: 7.4, mass: 25, source: "PICHLER FliteZone 500 2S LiPo: 500 mAh, 7.4 V, 25 g, 42 × 14 × 10 mm" },
   controller: { sleepAmps: 0.002, volts: 3.8, mass: 3, source: "Seeed XIAO ESP32-S3: about 2 mA light sleep at board level (Seeed spec, qoitech measurement)" },
   flexion: { mcp: 90, pip: 100, dip: 70, source: "Typical full-fist joint angles: MCP about 90°, PIP about 100°, DIP about 70°" },
+  // The repulsor, translated: a palm spotlight. One LED behind a narrow TIR lens.
+  led: { flux: 480, current: 1.05, vf: 2.95, maxCurrent: 3, mass: 1.6, source: "Cree XLamp XP-L (HD) data sheet: V6 bin 480–500 lm min at 1050 mA, 85 °C; Vf 2.95 V typ at 1050 mA, 85 °C; 3000 mA max (cree-led.com, XLamp-XPL.pdf). Mass of LED on a 20 mm star, typical." },
+  droop: { exponent: 0.85, range: [0.78, 0.92], resistance: 0.12, source: "Assumed: flux rises as current^0.85 above 1050 mA and Vf rises about 0.12 V per amp. The data sheet's relative-flux and Vf charts could not be read here, so this is low confidence." },
+  optic: { cdPerLm: 7.8, efficiency: 0.854, fwhm: 16.7, mass: 1.5, source: "Carclo 10003 20 mm narrow spot TIR with Cree XP-L: 85.4% efficient, 16.7° FWHM, 7.8 cd/lm (carclo-optics.com, optic-10003-led-cree-xlamp-xp-l-white)" },
+  ansiFl1: { lux: 0.25, source: "ANSI/PLATO FL 1: beam distance is where the beam falls to 0.25 lux (full moonlight), so distance = √(cd / 0.25) (Streamlight, Pelican, Olight explainers)" },
+  burn: { metal1min: 51, metal10min: 48, metal8h: 43, source: "EN ISO 13732-1:2006 burn thresholds for uncoated metal: 51 °C for 1 min, 48 °C for 10 min, 43 °C for 8 h (as reproduced in CENELEC Guide 29)" },
+  convection: { h: 10, range: [5, 25], source: "Natural convection in air: 5–25 W/m²K (SolidWorks docs; University of Waterloo ECE309 notes). 10 W/m²K taken for a small still palm." },
+  ler: { value: 300, range: [280, 330], source: "Luminous efficacy of the radiation of a cool-white phosphor LED, about 280–330 lm per optical watt (typical; assumed)" },
+  driver: { efficiency: 0.9, mass: 2, source: "Small buck LED driver from 2S Li-ion, about 90% efficient (typical; assumed)" },
+  aluminium6061: { c: 0.896, source: "6061 aluminium specific heat 0.896 J/g·K" },
 };
+
 
 export const PARAMS = {
   plateMaterial: "petg",
@@ -28,6 +39,12 @@ export const PARAMS = {
   knockSpeed: 2,
   glancing: 0.5,
   edgeContact: 12,
+  beamCurrent: 3,
+  spreader: 8,
+  housingArea: 14,
+  beamHold: 60,
+  startTemp: 33,
+  throwNeed: 100,
 };
 
 export const CONTROLS = {
@@ -35,6 +52,7 @@ export const CONTROLS = {
   pins: { label: "Hinge pins", values: ["petg", "steel"], names: { petg: "printed", steel: "steel" } },
   forceStop: { label: "Force stop", values: [0, 25, 15, 12], unit: " N", names: { 0: "off" } },
   plateMaterial: { label: "Plates", values: ["petg", "pa12", "aluminium"], names: { petg: "PETG", pa12: "nylon", aluminium: "aluminium" } },
+  beamCurrent: { label: "Beam power", values: [3, 2, 1.5, 1.05], unit: " A" },
 };
 
 export const MARGIN = { knock: 2 };
@@ -65,6 +83,8 @@ export const SCENARIOS = [
   { id: "fist", name: "Make a fist", story: "Once the glove is on, close the hand into a full fist." },
   { id: "pinch", name: "Finger in the way", story: "The middle finger is still bent while the glove forms over it." },
   { id: "knock", name: "Knock on a table", story: "A glancing knock on a table edge at about 2 m/s, played on a pendulum impact tester." },
+  { id: "beam", name: "Fire the beam", story: "The palm opens over a light meter on the bench and the repulsor fires: one LED behind a narrow lens, a spotlight, not a weapon." },
+  { id: "heat", name: "Hold it on", story: "The beam stays on for a full minute while the aluminium heat spreader in the palm warms up against the skin." },
   { id: "day", name: "Wear it all day", story: "Weight on the wrist, battery life on standby and how many times it can form per charge." },
 ];
 
@@ -120,7 +140,7 @@ export function massOf(p) {
   const plates = platesOf(p);
   const plateMass = plates.reduce((sum, plate) => sum + plate.area * p.plateThick * materialOf(p).density * 1e-3, 0);
   const magnets = plates.length * 0.29;
-  const parts = { plates: plateMass, magnets, cuff: 55, motors: p.motors * DATA.motor.mass, battery: DATA.battery.mass, controller: DATA.controller.mass, liner: 20, pins: p.pins === "steel" ? 6 : 2 };
+  const parts = { plates: plateMass, magnets, repulsor: DATA.led.mass + DATA.optic.mass + DATA.driver.mass + p.spreader, cuff: 55, motors: p.motors * DATA.motor.mass, battery: DATA.battery.mass, controller: DATA.controller.mass, liner: 20, pins: p.pins === "steel" ? 6 : 2 };
   return { parts, total: Object.values(parts).reduce((a, b) => a + b, 0) };
 }
 
@@ -128,6 +148,35 @@ export function stretchOf(joint, flexDeg) {
   const r = SEG_THICK / 2 + PARAMS.liner + PARAMS.plateThick;
   const scale = { mcp: 1, pip: 0.82, dip: 0.66 }[joint];
   return r * scale * (flexDeg * Math.PI) / 180;
+}
+
+// Palm spotlight. Flux and Vf are anchored on the datasheet point (1050 mA) and
+// extrapolated with the assumed droop; peak intensity comes from the optic's cd/lm.
+export function beamOf(p, env = {}) {
+  const L = DATA.led, d = DATA.droop;
+  const i = p.beamCurrent;
+  const flux = L.flux * (i / L.current) ** (env.droop ?? d.exponent);
+  const vf = L.vf + d.resistance * (i - L.current);
+  const electric = vf * i;
+  const optical = flux / (env.ler ?? DATA.ler.value);
+  const heat = electric - optical;
+  const candela = flux * DATA.optic.cdPerLm;
+  const throwM = Math.sqrt(candela / DATA.ansiFl1.lux);
+  const fromBattery = electric / DATA.driver.efficiency;
+  return { flux, vf, electric, optical, heat, candela, throwM, fromBattery };
+}
+
+// The spreader as one lump of aluminium: heated by the LED, cooled by still air on
+// its open face. The liner's insulation is ignored, so this is the hot side of the truth.
+export function heatOf(p, seconds, env = {}) {
+  const b = beamOf(p, env);
+  const C = p.spreader * DATA.aluminium6061.c;
+  const G = (env.h ?? DATA.convection.h) * p.housingArea * 1e-4;
+  const start = env.start ?? p.startTemp;
+  const ambient = env.ambient ?? 25;
+  const settle = ambient + b.heat / G;
+  const temp = settle + (start - settle) * Math.exp((-G * seconds) / C);
+  return { ...b, C, G, temp, settle };
 }
 
 export function stateOf(p, scenario, env = {}) {
@@ -172,6 +221,17 @@ export function stateOf(p, scenario, env = {}) {
     const release = -Math.acos(Math.max(-1, Math.cos(PENDULUM.strike) - drop / PENDULUM.arm));
     return { scenario, impact, sideways, perPin, capacity, energy, release, checks };
   }
+  if (scenario === "beam") {
+    const b = beamOf(p, env);
+    checks.push(check("throw", "Beam reach", b.throwM, p.throwNeed, "m", "over", "medium", (v) => `${Math.round(v)} m`, (ok, v) => (ok ? `${Math.round(b.flux)} lm through the lens makes ${Math.round(b.candela)} cd at the centre: it lights a target ${Math.round(v)} m away` : `only ${Math.round(b.candela)} cd at the centre: it reaches ${Math.round(v)} m, short of the ${p.throwNeed} m it needs`)));
+    return { scenario, ...b, checks };
+  }
+  if (scenario === "heat") {
+    const seconds = env.hold ?? p.beamHold;
+    const h = heatOf(p, seconds, env);
+    checks.push(check("temp", "Palm housing temperature", h.temp, DATA.burn.metal1min, "°C", "under", "low", (v) => `${Math.round(v)} °C`, (ok, v) => (ok ? `after ${seconds} s on, the housing reaches ${Math.round(v)} °C, under the ${DATA.burn.metal1min} °C burn limit for a minute on bare metal` : `${h.heat.toFixed(1)} W of heat into ${p.spreader} g of aluminium: ${Math.round(v)} °C after ${seconds} s, over the ${DATA.burn.metal1min} °C burn limit`)));
+    return { scenario, ...h, seconds, checks };
+  }
   if (scenario === "day") {
     const mass = massOf(p);
     const d = deployOf(p);
@@ -181,18 +241,20 @@ export function stateOf(p, scenario, env = {}) {
     checks.push(check("mass", "Weight on the wrist", mass.total, 300, "g", "under", "low", (v) => `${Math.round(v)} g`, (ok, v) => (ok ? `${Math.round(v)} g, lighter than a full can of soda` : `${Math.round(v)} g, heavier than the 300 g comfort limit`)));
     checks.push(check("standby", "Standby on one charge", standby, 8, "h", "over", "medium", (v) => `${Math.round(v)} h`, (ok, v) => `${Math.round(v)} h on standby`));
     checks.push(check("forms", "Forms per charge", forms, 100, "", "over", "medium", (v) => `${Math.round(v)}`, (ok, v) => `forms about ${Math.round(v / 10) * 10} times per charge`));
-    return { scenario, mass, standby, forms, checks };
+    const beamMin = (wh / beamOf(p).fromBattery) * 60;
+    checks.push(check("beamtime", "Beam time per charge", beamMin, 10, "min", "over", "medium", (v) => `${Math.round(v)} min`, (ok, v) => (ok ? `about ${Math.round(v)} min of beam per charge` : `only ${Math.round(v)} min of beam per charge, under 10 min`)));
+    return { scenario, mass, standby, forms, beamMin, checks };
   }
   return { scenario, checks };
 }
 
-const SHORT = { deploy: ["forms in", "too slow"], gap: ["gap", "skin shows"], pressure: ["on the finger", "hurts"], force: ["clamp", "too hard"], pins: ["pin strength", "snaps"], mass: ["weight", "too heavy"], standby: ["standby", "too short"], forms: ["forms per charge", "too few"] };
+const SHORT = { throw: ["reach", "too short"], temp: ["housing", "burns"], beamtime: ["of beam", "too short"], deploy: ["forms in", "too slow"], gap: ["gap", "skin shows"], pressure: ["on the finger", "hurts"], force: ["clamp", "too hard"], pins: ["pin strength", "snaps"], mass: ["weight", "too heavy"], standby: ["standby", "too short"], forms: ["forms per charge", "too few"] };
 function check(id, label, value, mark, unit, sense, confidence, fmt, say) {
   const pass = sense === "under" ? value <= mark : value >= mark;
   const margin = sense === "under" ? mark / Math.max(value, 1e-9) : value / mark;
   const [what, bad] = SHORT[id];
   const text = fmt(value);
-  const short = id === "deploy" || id === "pressure" || id === "forms" ? (id === "deploy" ? `${what} ${text}` : `${text} ${what}`) : `${what} ${text}`;
+  const short = id === "deploy" || id === "pressure" || id === "forms" || id === "beamtime" ? (id === "deploy" ? `${what} ${text}` : `${text} ${what}`) : `${what} ${text}`;
   return { id, label, value, mark, unit, sense, pass, margin, confidence, text, words: say(pass, value), short: `${short} · ${pass ? "holds" : bad}` };
 }
 
@@ -202,6 +264,8 @@ const RANGES = {
   fist: (r) => ({ radius: 0.85 + 0.3 * r(), flex: { mcp: 85 + 10 * r(), pip: 95 + 10 * r(), dip: 65 + 10 * r() } }),
   pinch: (r) => ({ torque: 0.8 + 0.4 * r() }),
   knock: (r) => ({ speed: 1.5 + 1.5 * r(), strength: 0.66 + 0.68 * r() }),
+  beam: (r) => ({ droop: DATA.droop.range[0] + (DATA.droop.range[1] - DATA.droop.range[0]) * r() }),
+  heat: (r) => ({ droop: DATA.droop.range[0] + (DATA.droop.range[1] - DATA.droop.range[0]) * r(), ler: DATA.ler.range[0] + (DATA.ler.range[1] - DATA.ler.range[0]) * r(), h: DATA.convection.range[0] + (DATA.convection.range[1] - DATA.convection.range[0]) * r(), ambient: 20 + 15 * r(), start: 31 + 4 * r() }),
   day: () => ({}),
 };
 
@@ -244,6 +308,8 @@ const LEVERS = [
   { key: "forceStop", values: [25, 15, 12, 10], fixes: ["pressure", "force"] },
   { key: "pins", values: ["steel"], fixes: ["pins"] },
   { key: "pinD", values: [2.5, 3], fixes: ["pins"] },
+  { key: "beamCurrent", values: [2, 1.5, 1.05], fixes: ["temp", "beamtime"] },
+  { key: "spreader", values: [12, 16, 24], fixes: ["temp"] },
 ];
 
 export function fixesOf(p) {

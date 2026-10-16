@@ -1,11 +1,11 @@
-.fg {
+.fg, .fg-summary {
   --fg-led: #7fd8ff;
   --fg-ring: #ffffff12;
   --fg-hover: #ffffff0a;
   --fg-fail: #ff7a6b;
   --fg-fixed: #e6e6e6;
 }
-[data-theme="light"] .fg {
+[data-theme="light"] .fg, [data-theme="light"] .fg-summary {
   --fg-led: #0077b6;
   --fg-ring: #00000016;
   --fg-hover: #0000000a;
@@ -41,10 +41,10 @@
 .fg-card-words { margin: 8px 4px 0; font-size: 12px; color: var(--anatomy-muted); line-height: 1.5; }
 .fg-card { overflow: hidden; } .fg-card svg { overflow: hidden; }
 /* Mark 85 colours: red shells, gold knuckle guards, joints and repulsor housing. Failure highlights (data-lit) keep the kit's colours. */
-.fg { --im-red-0:#2b0f0d; --im-red-1:#36130f; --im-red-2:#421813; --im-red-3:#501d17; --im-red-top:#62241c; --im-red-fill:#3a1411;
+.fg, .fg-summary { --im-red-0:#2b0f0d; --im-red-1:#36130f; --im-red-2:#421813; --im-red-3:#501d17; --im-red-top:#62241c; --im-red-fill:#3a1411;
   --im-gold-0:#2a2211; --im-gold-1:#352b15; --im-gold-2:#41351a; --im-gold-3:#4f411f; --im-gold-top:#625127; --im-gold-fill:#3a3017;
   --im-lens:#0d1a20; --im-glow:#bff0ff; }
-[data-theme="light"] .fg { --im-red-0:#9e2f27; --im-red-1:#b0382f; --im-red-2:#c24339; --im-red-3:#d05046; --im-red-top:#dc6157; --im-red-fill:#c24339;
+[data-theme="light"] .fg, [data-theme="light"] .fg-summary { --im-red-0:#9e2f27; --im-red-1:#b0382f; --im-red-2:#c24339; --im-red-3:#d05046; --im-red-top:#dc6157; --im-red-fill:#c24339;
   --im-gold-0:#b48f3c; --im-gold-1:#c49e4a; --im-gold-2:#d3ae5b; --im-gold-3:#dfbd6e; --im-gold-top:#e8ca82; --im-gold-fill:#d3ae5b;
   --im-lens:#cfe9f2; --im-glow:#5fd0ff; }
 .im-red:not([data-lit]) > .iso-fill { fill: var(--im-red-fill); }
@@ -61,3 +61,7 @@
 .im-gold:not([data-lit]) > .iso-top { fill: var(--im-gold-top); }
 .im-lens { fill: var(--im-lens); stroke: none; }
 .im-glow { fill: var(--im-glow); stroke: none; filter: drop-shadow(0 0 4px var(--fg-led)) drop-shadow(0 0 10px var(--fg-led)); }
+.im-beam { fill: var(--fg-led); stroke: none; }
+[data-theme="light"] .im-beam { fill: #2aa9e0; }
+.im-stop { stop-color: var(--fg-led); }
+[data-theme="light"] .im-stop { stop-color: #2aa9e0; }
