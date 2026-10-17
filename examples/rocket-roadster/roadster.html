@@ -2947,6 +2947,8 @@ function tick(now) {
     tourIndex = (tourIndex + 1) % TOUR.length;
     if (tourIndex === 0) reset(false);
     const step = TOUR[tourIndex];
+    // This frame is finishing: clear it so start() can schedule the next act's first frame.
+    frame = 0;
     start(step.act, step.mode ?? "play", step.fix ?? null);
     return;
   }

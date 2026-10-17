@@ -179,7 +179,7 @@ body{background:var(--page);color:var(--text);font:14px/1.6 ui-sans-serif,system
 *{box-sizing:border-box}
 #fg-root{background:var(--anatomy-page);padding-block:40px 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));min-height:100%}
 .iso-page{width:min(860px,100%);margin:0 auto}`;
-  const out = `<title>Rocket Roadster Trials</title><meta name="claude:viewport-fit-sides" content="cover"><style>${k.ISO_CSS}${PAGE}${CSS}</style><div class="iso" id="fg-root" data-theme="dark">${THEME_SCRIPT}<main class="iso-page">${page}</main></div><script type="module">${script.replace(/<\/(script)/gi, "<\\/$1")}</script>`;
+  const out = `<meta charset="utf-8"><title>Rocket Roadster Trials</title><meta name="claude:viewport-fit-sides" content="cover"><style>${k.ISO_CSS}${PAGE}${CSS}</style><div class="iso" id="fg-root" data-theme="dark">${THEME_SCRIPT}<main class="iso-page">${page}</main></div><script type="module">${script.replace(/<\/(script)/gi, "<\\/$1")}</script>`;
   writeFileSync(join(HERE, "roadster-artifact.html"), out);
   console.log("wrote roadster-artifact.html", `${(out.length / 1024).toFixed(0)} KB`);
 }
