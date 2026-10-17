@@ -12,7 +12,7 @@ export function makeCar(k, G, P) {
 
   // Pose: local point → world. Roll about the car's long axis, pitch about its width,
   // both through the middle of the body; then the part's own take-apart offset.
-  let POSE = { x: 0, y: 0, z: 0, roll: 0, pitch: 0 };
+  let POSE = { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0 };
   let OFF = null;
   const W = (q) => {
     let [x, y, z] = OFF ? add(q, OFF) : q;
@@ -21,6 +21,8 @@ export function makeCar(k, G, P) {
     [y, z] = [y * cr - z * sr, y * sr + z * cr];
     const cp = Math.cos(POSE.pitch), sp = Math.sin(POSE.pitch);
     [x, z] = [x * cp - z * sp, x * sp + z * cp];
+    const cw = Math.cos(POSE.yaw), sw = Math.sin(POSE.yaw);
+    [x, y] = [x * cw - y * sw, x * sw + y * cw];
     return [x + POSE.x, y + POSE.y, z + CY + POSE.z];
   };
   const dirOf = (v) => { const saved = OFF; OFF = null; const a = W([0, 0, CY]), b = W(add([0, 0, CY], v)); OFF = saved; return G.unit3(sub(b, a)); };
@@ -60,60 +62,112 @@ export function makeCar(k, G, P) {
     return { fill: k.pathOf(hull, true), outline: k.pathOf(hull, true), crease: crease.join(""), top: buckets[4].join(""), shades: buckets.slice(0, 4).map((b) => b.join("")) };
   }
 
-  // A rounded box section across the car at station x: half-width w/2, from z0 to z1.
-  const SE = (c, n) => Math.sign(c) * Math.abs(c) ** (2 / n);
-  function section(x, w, z0, z1, n = 3.2, count = 24) {
-    const out = [];
-    const zc = (z0 + z1) / 2, hz = (z1 - z0) / 2;
-    for (let i = 0; i < count; i++) {
-      const a = (i / count) * 2 * Math.PI;
-      out.push([x, (w / 2) * SE(Math.cos(a), n), zc + hz * SE(Math.sin(a), n)]);
-    }
-    return out;
+  // Faceted section across the car at station x (Cybertruck-style flat panels): a flat floor,
+  // vertical sides up to the shoulder crease, then a sloped panel to a flat top.
+  // [x, half-width, floor z, shoulder z, top z, half-width of the top]
+  function section([x, hw, z0, zs, zt, ht]) {
+    return [[x, -hw + 8, z0], [x, hw - 8, z0], [x, hw, z0 + 8], [x, hw, zs], [x, ht, zt], [x, -ht, zt], [x, -hw, zs], [x, -hw, z0 + 8]];
   }
-  // Body: a low wedge, nose down at +x, tail up at −x.
-  const BODY = [[-228, 150, 26, 60], [-218, 186, 18, 72], [-160, 200, 16, 76], [-40, 202, 15, 72], [80, 200, 15, 64], [165, 190, 16, 54], [212, 168, 19, 42], [229, 132, 23, 34]];
-  const CABIN = [[-100, 112, 64, 70], [-70, 138, 64, 104], [-10, 140, 64, 114], [40, 130, 64, 106], [82, 104, 60, 66]];
-  const WHEELS = [[145, 1], [145, -1], [-142, 1], [-142, -1]];
-  const TANKS = [[0, 42], [0, -42]];
-  const NOZZLES = [
-    { id: "rear", at: [-231, 30, 40], dir: [-1, 0, 0] }, { id: "rear", at: [-231, -30, 40], dir: [-1, 0, 0] },
-    { id: "lift", at: [168, 78, 14], dir: [0, 0, -1] }, { id: "lift", at: [168, -78, 14], dir: [0, 0, -1] },
-    { id: "lift", at: [-168, 78, 14], dir: [0, 0, -1] }, { id: "lift", at: [-168, -78, 14], dir: [0, 0, -1] },
-    { id: "rollL", at: [60, 92, 19], dir: [0, 0, -1] }, { id: "rollL", at: [-60, 92, 19], dir: [0, 0, -1] },
-    { id: "rollR", at: [60, -92, 19], dir: [0, 0, -1] }, { id: "rollR", at: [-60, -92, 19], dir: [0, 0, -1] },
+  // Body: one rising wedge line from a knife-edge nose (+x) to a high, cut-off tail (−x).
+  // Length 4.45 m, width 2.0 m (stand-ins: the reveal gave no dimensions).
+  const BODY = [
+    [222, 66, 14, 24, 28, 44],
+    [190, 92, 14, 34, 40, 66],
+    [130, 100, 13, 48, 54, 72],
+    [40, 100, 13, 60, 68, 70],
+    [-60, 100, 13, 70, 80, 66],
+    [-160, 98, 15, 78, 90, 62],
+    [-212, 92, 22, 82, 92, 58],
+    [-222, 88, 30, 82, 90, 56],
   ];
+  const deckAt = (x) => {
+    for (let i = 1; i < BODY.length; i++) if (x >= BODY[i][0]) {
+      const a = BODY[i], b = BODY[i - 1], f = (x - a[0]) / (b[0] - a[0]);
+      return a[4] + (b[4] - a[4]) * f;
+    }
+    return BODY[BODY.length - 1][4];
+  };
+  // Canopy: small, set well back, fighter-style, its windshield raked hard.
+  const CANOPY = [[96, 40, 0], [40, 54, 30], [-20, 58, 36], [-80, 50, 26], [-122, 34, 4]];
+  const WHEELS = [[132, 1], [132, -1], [-133, 1], [-133, -1]];
+  // Two carbon tanks across the car behind the seats.
+  const TANKS = [[-78, 0], [-132, 0]];
+  // Ten nozzles. R: four in a row under the rear plate, aft and 15° down. F: two at the nose
+  // corners, down. S: two on each sill near the axles, down (lift, and roll when one side fires).
+  const down15 = [-Math.cos(0.26), 0, -Math.sin(0.26)];
+  const NOZZLES = [
+    ...[-27, -9, 9, 27].map((y) => ({ id: "rear", at: [-223, y, 60], dir: down15 })),
+    { id: "front", at: [196, 52, 14], dir: [0, 0, -1] }, { id: "front", at: [196, -52, 14], dir: [0, 0, -1] },
+    { id: "rollL", at: [104, 94, 14], dir: [0, 0, -1] }, { id: "rollL", at: [-104, 94, 14], dir: [0, 0, -1] },
+    { id: "rollR", at: [104, -94, 14], dir: [0, 0, -1] }, { id: "rollR", at: [-104, -94, 14], dir: [0, 0, -1] },
+  ];
+  // Four suction fans in the diffuser at the tail.
+  const FANS = [-63, -21, 21, 63];
 
   function body(style) {
-    const rings = BODY.map(([x, w, z0, z1]) => section(x, w, z0, z1));
-    // The spine seam runs nose to tail and ends on the body's end edges.
-    const top = BODY.map(([x, w, , z1]) => [x, 0, z1]);
-    const seams = L(k.pathOf(top.map(at)), { tone: "faint" });
-    return S(loftOf(rings), { tone: "hi", crease: "lo", ...style, inner: seams });
+    const rings = BODY.map(section);
+    // Crease lines nose to tail along each shoulder and the spine, only on faces that show.
+    const shows = (v) => G.dot3(dirOf(v), V) > 0.02;
+    const line = (pick) => k.pathOf(BODY.map(pick).map(at));
+    let creases = "";
+    if (shows([0, 1, 0])) creases += line(([x, hw, , zs]) => [x, hw, zs]);
+    if (shows([0, -1, 0])) creases += line(([x, hw, , zs]) => [x, -hw, zs]);
+    if (shows([0, 0, 1])) creases += line(([x, , , , zt]) => [x, 0, zt]);
+    // Full-width light bars across the nose and the tail face, edge to edge, where those faces show.
+    const n = BODY[0], t = BODY[BODY.length - 1];
+    let bars = "";
+    if (shows([1, 0, 0])) bars += k.pathOf([at([n[0], -n[1], n[2] + 9]), at([n[0], n[1], n[2] + 9])]);
+    if (shows([-1, 0, 0])) bars += k.pathOf([at([t[0], -t[1], 78]), at([t[0], t[1], 78])]);
+    return S(loftOf(rings), { tone: "hi", crease: "lo", ...style, inner: L(creases, { tone: "faint" }) + L(bars, { tone: "hi" }) });
   }
-  function cabin(style) {
-    const rings = CABIN.map(([x, w, z0, z1]) => section(x, w, z0, z1, 2.6));
+  function canopy(style) {
+    const rings = CANOPY.map(([x, hw, h]) => {
+      const z = deckAt(x) - 1;
+      return [[x, -hw, z], [x, hw, z], [x, hw * 0.78, z + h * 0.8], [x, hw * 0.42, z + h], [x, -hw * 0.42, z + h], [x, -hw * 0.78, z + h * 0.8]];
+    });
     return S(loftOf(rings), { tone: "mid", crease: "faint", ...style });
   }
+  function wing(style) {
+    // A flush rear wing, its blade standing just proud of the deck at the tail.
+    const z = deckAt(-196);
+    const F = G.frameOf(W([-212, -88, z]), dirOf([0, 1, 0]), dirOf([1, 0, 0]), dirOf([0, 0, 1]));
+    return S(G.prismOf(F, [[0, 0], [30, 0], [30, 3], [2, 6], [0, 6]], 0, 176, P), { tone: "mid", crease: "faint", ...style });
+  }
+  function skirt(side) {
+    const F = G.frameOf(W([-150, side * 99, 5]), dirOf([1, 0, 0]), dirOf([0, side, 0]), dirOf([0, 0, 1]));
+    return S(G.prismOf(F, [[-1, 0], [1, 0], [1, 9], [-1, 9]], 0, 300, P), { tone: "lo", crease: "none" });
+  }
   function wheel([x, side], style) {
-    const F = G.frameOf(W([x, side * 74, 34]), dirOf([0, side, 0]), dirOf([1, 0, 0]), dirOf([0, 0, 1]));
-    const tyre = G.lathe([[0, 0], [0, 26], [1.5, 32, 1], [4, 34, 1], [22, 34, 1], [24.5, 32, 1], [26, 26], [26, 0]], F, P, { steps: 48 });
-    const hub = G.disc(26, 27.2, 19, F, P);
-    return S(tyre, { tone: "lo", ...style }) + S(hub, { tone: "mid" }) + D(G.dotsOf(F, 27.2, 9, 5, P, { all: true }), { size: 0.4, tone: "mid" });
+    const F = G.frameOf(W([x, side * 70, 36]), dirOf([0, side, 0]), dirOf([1, 0, 0]), dirOf([0, 0, 1]));
+    const tyre = G.lathe([[0, 0], [0, 28], [1.5, 34, 1], [4, 36, 1], [26, 36, 1], [28.5, 34, 1], [30, 28], [30, 0]], F, P, { steps: 48 });
+    const rim = L(G.circleOf(F, 30, 26, P, 40) + G.circleOf(F, 30, 6.5, P, 16) + G.spokesOf(F, 30, 6.5, 26, 10, P, { phase: 0.1 }), { tone: "lo" });
+    const hub = G.disc(30, 31.2, 6.5, F, P);
+    return S(tyre, { tone: "lo", ...style, inner: rim }) + S(hub, { tone: "mid" });
   }
   function tank([x, y], style) {
-    const F = G.frameOf(W([x - 95, y, 48]), dirOf([1, 0, 0]), dirOf([0, 1, 0]), dirOf([0, 0, 1]));
-    const shell = G.lathe([[0, 0], [5, 13, 1], [12, 20, 1], [22, 23], [168, 23], [178, 20, 1], [185, 13, 1], [190, 0]], F, P, { steps: 48 });
-    const bands = [40, 95, 150].map((s) => G.arcOf(F, s, 23, P)).join("");
+    const F = G.frameOf(W([x, -80, 42]), dirOf([0, 1, 0]), dirOf([1, 0, 0]), dirOf([0, 0, 1]));
+    const shell = G.lathe([[0, 0], [5, 13, 1], [12, 20, 1], [22, 24], [138, 24], [148, 20, 1], [155, 13, 1], [160, 0]], F, P, { steps: 48 });
+    const bands = [40, 80, 120].map((s) => G.arcOf(F, s, 24, P)).join("");
     return S(shell, { tone: "hi", ...style, inner: L(bands, { tone: "faint" }) });
   }
   function valves(style) {
-    const F = G.frameOf(W([-150, -36, 30]), dirOf([0, 1, 0]), dirOf([1, 0, 0]), dirOf([0, 0, 1]));
-    return S(G.prismOf(F, [[-14, 0], [14, 0], [14, 22], [-14, 22]], 0, 72, P), { tone: "mid", ...style });
+    const F = G.frameOf(W([-176, -36, 40]), dirOf([0, 1, 0]), dirOf([1, 0, 0]), dirOf([0, 0, 1]));
+    return S(G.prismOf(F, [[-12, 0], [12, 0], [12, 18], [-12, 18]], 0, 72, P), { tone: "mid", ...style });
+  }
+  function fan(y, style) {
+    // A ducted fan behind a ring in the tail face: the duct, then its blades.
+    const F = G.frameOf(W([-222, y, 44]), dirOf([-1, 0, 0]), dirOf([0, 1, 0]), dirOf([0, 0, 1]));
+    const duct = G.disc(0, 2.4, 13, F, P);
+    const blades = L(G.spokesOf(F, 2.5, 3, 11, 7, P, { sweep: 0.5 }) + G.circleOf(F, 2.5, 3, P, 16) + G.circleOf(F, 2.5, 11, P, 28), { tone: "lo" });
+    return S(duct, { tone: "mid", inner: blades, ...style });
+  }
+  function plate() {
+    const F = G.frameOf(W([-222.4, -24, 64]), dirOf([0, 1, 0]), dirOf([0, 0, 1]), dirOf([-1, 0, 0]));
+    return S(G.prismOf(F, [[0, 0], [12, 0], [12, 1], [0, 1]], 0, 48, P), { tone: "mid", crease: "none" });
   }
   function nozzle(nz, style) {
     const F = G.frameAlong(W(nz.at), dirOf(nz.dir));
-    return S(G.lathe([[-6, 0], [-6, 4.5], [0, 4.5], [3, 6.5, 1], [5, 7.5], [5, 0]], F, P, { steps: 24 }), { tone: "mid", ...style });
+    return S(G.lathe([[-6, 0], [-6, 4], [0, 4], [3, 5.5, 1], [5, 6.5], [5, 0]], F, P, { steps: 24 }), { tone: "mid", ...style });
   }
 
   // Cold-gas jets: a cone from the nozzle, its length set by thrust, fading into the air.
@@ -136,7 +190,7 @@ export function makeCar(k, G, P) {
   // The whole car. pose: { x, y, z (cm), roll, pitch, apart (0..1), jets: { rear, lift, roll } as 0..1 shares
   // (roll signed: + fires the left side), lit: { wheels, tanks, body } }.
   function car(pose) {
-    POSE = { x: 0, y: 0, z: 0, roll: 0, pitch: 0, ...pose };
+    POSE = { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0, ...pose };
     const lit = pose.lit ?? {};
     const A = pose.apart ?? 0;
     const ease = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
@@ -150,22 +204,26 @@ export function makeCar(k, G, P) {
       OFF = null;
       items.push({ key, depth: k.depthOf(centre, P) + bias, svg });
     };
-    for (const t of TANKS) put("tank", [t[0], t[1], 48], [0, t[1] * 0.6, 0], 0.3, () => tank(t, lit.tanks ? { lit: true } : {}), -400);
-    put("valves", [-150, 0, 40], [-40, 0, 30], 0.4, () => valves(), -390);
+    for (const t of TANKS) put("tank", [t[0], 0, 42], [0, 0, 40], 0.3, () => tank(t, lit.tanks ? { lit: true } : {}), -400);
+    put("valves", [-176, 0, 50], [-40, 0, 30], 0.4, () => valves(), -390);
     NOZZLES.forEach((nz, i) => put("nozzle", nz.at, mul(nz.dir, 50), 0.5 + (i % 4) * 0.05, () => nozzle(nz)));
     // "open" lifts only the bodywork, to show the tanks; "apart" takes everything apart.
     const lift = (z) => [0, 0, pose.open ? z * ease(pose.open) : z];
     put("body", [0, 0, 45], lift(120), pose.open ? -1 : 0.8, () => body(lit.body ? { lit: true } : {}));
-    put("cabin", [0, 0, 92], lift(210), pose.open ? -1 : 0.9, () => cabin());
-    WHEELS.forEach((w, i) => put("wheel", [w[0], w[1] * 87, 34], [0, w[1] * 80, 0], 0.6 + i * 0.03, () => wheel(w, lit.wheels ? { lit: true } : {})));
+    put("canopy", [-10, 0, 100], lift(200), pose.open ? -1 : 0.9, () => canopy());
+    put("wing", [-196, 0, 94], lift(150), pose.open ? -1 : 0.85, () => wing());
+    put("plate", [-223, 0, 70], lift(120), pose.open ? -1 : 0.8, () => plate(), 2);
+    FANS.forEach((y, i) => put("fan", [-222, y, 44], [-60, y * 0.4, 0], 0.55 + i * 0.03, () => fan(y), 3));
+    for (const side of [1, -1]) put("skirt", [0, side * 99, 9], [0, side * 40, -20], 0.5, () => skirt(side));
+    WHEELS.forEach((w, i) => put("wheel", [w[0], w[1] * 85, 36], [0, w[1] * 80, 0], 0.6 + i * 0.03, () => wheel(w, lit.wheels ? { lit: true } : {})));
     // Jets sort with the parts by the depth of their middle, so a jet pointing away hides behind the body.
     const jets = pose.jets ?? {};
     for (const nz of NOZZLES) {
       let s = 0;
       if (nz.id === "rear") s = jets.rear ?? 0;
-      if (nz.id === "lift") s = jets.lift ?? 0;
-      if (nz.id === "rollL") s = Math.max(0, jets.roll ?? 0);
-      if (nz.id === "rollR") s = Math.max(0, -(jets.roll ?? 0));
+      if (nz.id === "front") s = jets.lift ?? 0;
+      if (nz.id === "rollL") s = Math.max(jets.lift ?? 0, jets.roll ?? 0);
+      if (nz.id === "rollR") s = Math.max(jets.lift ?? 0, -(jets.roll ?? 0));
       if (s > 0.01 && A < 0.2) {
         const mid = W(add(nz.at, mul(nz.dir, 60 + 100 * s)));
         items.push({ key: "jet", depth: k.depthOf(mid, P), svg: jet(nz, s) });
@@ -181,10 +239,10 @@ export function makeCar(k, G, P) {
     const ring = [];
     for (let i = 0; i < 32; i++) {
       const a = (i / 32) * 2 * Math.PI;
-      ring.push(k.iso([pose.x + 235 * Math.cos(a), (pose.y ?? 0) + 105 * Math.sin(a), 0.5], P));
+      ring.push(k.iso([pose.x + 230 * Math.cos(a), (pose.y ?? 0) + 104 * Math.sin(a), 0.5], P));
     }
     return `<path class="rr-shadow" d="${k.pathOf(ring, true)}" style="opacity:${(0.55 * fade).toFixed(3)}"/>`;
   }
 
-  return { car, shadow, NOZZLES };
+  return { car, shadow, NOZZLES, FANS };
 }

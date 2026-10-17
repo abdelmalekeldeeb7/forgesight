@@ -23,7 +23,9 @@ const C = makeCar(k, G, P);
 
 // Site plan, centimetres. Three lanes side by side, plus a hover pad.
 const LANE = { launch: 0, flip: -1500, hop: -3000 };
-const RAMP = { x: 2600, w: 300, len: 420 };
+// The inverted half-loop: its lowest point at LOOP.x on the middle lane; the car comes in
+// along −x, climbs the far wall, runs the overhang upside down and lets go at the top.
+const LOOP = { x: 2600, r: M.PARAMS.loopRadius * 100, track: 85, tw: 56, plate: 12, steps: 20 };
 const ROW_X = 3600;
 const HOP_START = ROW_X - 2200;
 const PAD = { x: -1100, y: 0, r: 380 };
@@ -54,8 +56,8 @@ function ground() {
   out.push(L(k.ring(PAD.x, PAD.y, PAD.r, 0, P, 72) + k.ring(PAD.x, PAD.y, PAD.r - 30, 0, P, 72), { tone: "mid" }));
   const inner = PAD.r - 30;
   out.push(L(k.lineOnTop([PAD.x - inner, PAD.y], [PAD.x + inner, PAD.y], 0, P) + k.lineOnTop([PAD.x, PAD.y - inner], [PAD.x, PAD.y + inner], 0, P), { tone: "lo" }));
-  // Landing box in the flip lane.
-  const land = { x: RAMP.x + 2800, y: LANE.flip - 200, w: 1800, d: 400, r: 4 };
+  // Landing box in the middle lane, past the loop.
+  const land = { x: LOOP.x + 1200, y: LANE.flip - 200, w: 2600, d: 400, r: 4 };
   out.push(L(k.planOutline(land, 0, P, 4), { tone: "mid" }));
   return out.join("");
 }
@@ -71,18 +73,49 @@ function gate(x, y) {
   return out.join("");
 }
 
-// The kicker: a steel wedge with a deck of slats, lip at RAMP.x.
-function ramp() {
-  const F = G.frameOf([RAMP.x, LANE.flip - RAMP.w / 2, 0], [0, 1, 0], [1, 0, 0], [0, 0, 1]);
-  const h = M.PARAMS.rampHeight * 100;
-  const poly = [[-RAMP.len, 0], [8, 0], [8, h], [0, h]];
-  const slats = [];
-  for (let s = 40; s < RAMP.len; s += 40) {
-    const x = RAMP.x - s, z = h * (1 - s / RAMP.len);
-    slats.push(k.segment([x, LANE.flip - RAMP.w / 2, z + 0.4], [x, LANE.flip + RAMP.w / 2, z + 0.4], P));
+// The half-loop in steel: two curved tracks under the wheels, cross-ties, and a gantry
+// (four towers, two top beams, cross beams with hangers) carrying the overhang.
+function loopProps() {
+  const out = [];
+  const y0 = LANE.flip, { x: LX, r } = LOOP;
+  const pt = (th, rad) => { const [x] = [LX - rad * Math.sin(th)]; return [x, r - rad * Math.cos(th)]; };
+  for (let i = 0; i < LOOP.steps; i++) {
+    const t0 = (Math.PI * i) / LOOP.steps, t1 = (Math.PI * (i + 1)) / LOOP.steps;
+    const quad = [pt(t0, r), pt(t1, r), pt(t1, r + LOOP.plate), pt(t0, r + LOOP.plate)];
+    const mid = pt((t0 + t1) / 2, r + LOOP.plate / 2);
+    for (const side of [-1, 1]) {
+      const y = y0 + side * LOOP.track - LOOP.tw / 2;
+      const F = G.frameOf([0, y, 0], [0, 1, 0], [1, 0, 0], [0, 0, 1]);
+      out.push({ id: `deck${i}${side}`, at: [mid[0], y0 + side * LOOP.track, mid[1]], svg: S(G.prismOf(F, quad, 0, LOOP.tw, P), { tone: "mid", crease: "lo" }) });
+    }
+    if (i % 2 === 1) {
+      const [tx, tz] = pt(t1, r + LOOP.plate + 6);
+      const F = G.frameAlong([tx, y0 - LOOP.track - LOOP.tw / 2, tz], [0, 1, 0]);
+      out.push({ id: `tie${i}`, at: [tx, y0, tz], svg: S(G.disc(0, 2 * LOOP.track + LOOP.tw, 6, F, P), { tone: "lo", crease: "none" }) });
+    }
   }
-  const ribs = [0.25, 0.5, 0.75].map((f) => k.segment([RAMP.x - RAMP.len * f, LANE.flip + RAMP.w / 2, 0], [RAMP.x - RAMP.len * f, LANE.flip + RAMP.w / 2, h * (1 - f)], P)).join("");
-  return S(G.prismOf(F, poly, 0, RAMP.w, P), { tone: "mid", crease: "lo", inner: L(slats.join(""), { tone: "faint" }) + L(ribs, { tone: "faint" }) });
+  const top = 2 * r + 260;
+  const towers = [LX - r - 160, LX + 220];
+  for (const x of towers) for (const side of [-1, 1]) {
+    const y = y0 + side * 270;
+    out.push({ id: `tower${x}${side}`, at: [x, y, top / 2], svg: S(k.cylinder(x, y, 34, 0, 6, P, 28), { tone: "lo" }) + S(k.slabOf({ x: x - 16, y: y - 16, w: 32, d: 32, r: 2 }, 6, top - 6, P, 2, 0.6), { tone: "mid", inner: L(k.sideSeam({ x: x - 16, y: y - 16, w: 32, d: 32, r: 2 }, top * 0.5, P, 2), { tone: "faint" }) }) });
+  }
+  for (const side of [-1, 1]) {
+    const y = y0 + side * 270;
+    const beam = { x: towers[0] - 20, y: y - 18, w: towers[1] - towers[0] + 40, d: 36, r: 3 };
+    out.push({ id: `beam${side}`, at: [LX, y, top], svg: S(k.slabOf(beam, top, 34, P, 3, 0.6), { tone: "mid" }) + L(k.planOutline(k.insetPlan(beam, 6), top + 34, P, 3), { tone: "faint" }) });
+  }
+  // Hangers: a cross beam on the two top beams, two rods down to the tracks.
+  for (const th of [0.62, 0.74, 0.86, 1].map((f) => f * Math.PI)) {
+    const [hx, hz] = pt(th, r + LOOP.plate);
+    const cross = { x: hx - 12, y: y0 - 288, w: 24, d: 576, r: 2 };
+    out.push({ id: `cross${th.toFixed(2)}`, at: [hx, y0, top + 40], svg: S(k.slabOf(cross, top + 34, 18, P, 2, 0.4), { tone: "mid" }) });
+    for (const side of [-1, 1]) {
+      const y = y0 + side * LOOP.track;
+      out.push({ id: `hang${th.toFixed(2)}${side}`, at: [hx, y, (hz + top) / 2], svg: S(k.cylinder(hx, y, 5, hz, top + 34 - hz, P, 16), { tone: "lo", crease: "none" }) });
+    }
+  }
+  return out;
 }
 
 // The parked row: generic vehicles across the hop lane, long side across the path.
@@ -137,18 +170,19 @@ const startPose = { x: PAD.x, y: PAD.y };
 const props = [
   ...[0, X60].flatMap((x) => [-310, 310].map((y) => ({ id: `gate${x}${y}`, at: [x, y, 60], svg: gate(x, y) }))),
   ...M.ROW.map((v) => ({ id: `row-${v.name}`, at: [ROW_X + v.dx * 100, LANE.hop, v.h * 50], svg: vehicle(v) })),
-];
+  ...loopProps(),
+].sort((a, b) => k.depthOf(a.at, P) - k.depthOf(b.at, P));
 const body = [
-  `<g data-part="ground">${ground()}${ramp()}</g>`,
+  `<g data-part="ground">${ground()}</g>`,
   `<g data-part="shadow">${C.shadow(startPose)}</g>`,
   ...props.map((p) => `<g data-prop="${p.id}">${p.svg}</g>`),
   `<g data-part="car" tabindex="-1">${C.car(startPose)}</g>`,
 ].join("");
-const LABEL = "A low two-seat roadster on a concrete test site with three lanes: a launch lane with timing gates, a lane with a steel kicker ramp, and a lane with a row of parked vehicles, a semi-truck cab in the middle. A hover pad sits at one end. Ten cold-gas nozzles are set into the car's body: two at the tail, four under the corners, four along the sills.";
+const LABEL = "A white wedge-shaped two-seat roadster with a small set-back canopy on a concrete test site with three lanes: a launch lane with timing gates, a lane running into a 19 m steel half-loop that curls over into an overhang, and a lane with a row of parked vehicles, a semi-truck cab in the middle. A hover pad sits at one end. Ten cold-gas nozzles are set into the car: four under the rear plate, two under the nose, four along the sills; four suction fans sit in the tail.";
 const svg = k.figureSvg({ width: W, height: H, label: LABEL, body });
 const consoleSvg = k.figureSvg({ width: CW, height: CH, label: "Ground station console: four knobs for the design and two gauges for tank pressure and temperature.", body: `${console0()}<g data-part="knobs">${KNOBS.map((kn) => `<g data-control="${kn.key}" tabindex="-1"></g>`).join("")}</g><g data-part="gauges"></g>` });
 
-const DATA = { W, H, P, PC, LANE, RAMP, ROW_X, HOP_START, PAD, X60, KNOBS, GAUGES, DESK_H, PROPS: props.map((p) => ({ id: p.id, at: p.at })), FIXES: M.fixesOf(M.PARAMS) };
+const DATA = { W, H, P, PC, LANE, LOOP, ROW_X, HOP_START, PAD, X60, KNOBS, GAUGES, DESK_H, PROPS: props.map((p) => ({ id: p.id, at: p.at })), FIXES: M.fixesOf(M.PARAMS) };
 
 const ACTS = M.SCENARIOS.map((s, i) => `<button type="button" class="fg-act" data-act="${s.id}"><span class="fg-num">${String(i).padStart(2, "0")}</span>${s.name}<span class="fg-mark" aria-hidden="true"></span></button>`).join("") + `<button type="button" class="fg-act" data-act="summary"><span class="fg-num">★</span>Report<span class="fg-mark" aria-hidden="true"></span></button>`;
 const corners = `<div class="iso-plate-corners" aria-hidden="true"><span class="iso-plate-corner" data-corner="fig">Fig 1</span><span class="iso-plate-corner" data-corner="title" data-title>How it works</span><span class="iso-plate-corner" data-corner="hint" data-hint>Click the car to take it apart</span><span class="iso-plate-corner" data-corner="readout" data-readout></span></div>`;

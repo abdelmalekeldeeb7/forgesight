@@ -13,9 +13,8 @@ near("Rear thrust from a full tank, N", M.tankOf(p).maxThrust(M.rearArea()) , 80
 const t = M.tankOf(p);
 while (t.bar > 200) t.fire(M.rearArea(), 1e9, 0.001);
 near("Air temperature after emptying 380 → 200 bar, K (isentropic)", t.T, 293.15 * (t.bar / 380) ** (0.4 / 1.4), 0.001, "Isentropic expansion: T₂ = T₁ (p₂/p₁)^((γ−1)/γ)");
-const flip = M.stateOf({ ...p, rollThrust: 0 }, "flip");
-const a = (p.rampAngle * Math.PI) / 180, v = p.rampSpeed, h = p.rampHeight;
-near("Airtime off the kicker with no thrust, s", flip.airtime, (v * Math.sin(a) + Math.sqrt((v * Math.sin(a)) ** 2 + 2 * 9.80665 * h)) / 9.80665, 0.01, "Projectile flight from a raised ramp");
+const coast = M.stateOf({ ...p, loopSpeed: 26 }, "loop", { power: 1e-6 });
+near("Speed at the top of the loop, motors off, m/s (energy: v² = v₀² − 4gr)", coast.topSpeed, Math.sqrt(26 ** 2 - 4 * 9.80665 * p.loopRadius), 0.01, "Conservation of energy round a vertical circle");
 within("0–60 mph, s, against Tesla's own figures", M.stateOf(p, "launch").time, 0.55, 0.81, "Tesla: 0.81 s shown at the demo (Thrust), 0.55 s cited for the Rocket");
 
 for (const row of rows) console.log(row.ok ? "ok  " : "FAIL", row.label.padEnd(64), row.got.toFixed(4).padStart(11), row.range ? `in [${row.range[0]}, ${row.range[1]}]` : `vs ${row.want.toFixed(4)}`, " ·", row.source);

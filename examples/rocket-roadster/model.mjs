@@ -5,9 +5,11 @@ export const DATA = {
   demo: { zeroTo60: 0.81, source: "Tesla Roadster event, McGregor TX, 15 Oct 2026: 0–60 mph in 0.81 s shown for the Thrust version (Not a Tesla App recap; Electrek)" },
   air: { litres: 600, bar: 380, tanks: 2, source: "Reports of the demo car: about 600 L of compressed air in two carbon-overwrapped tanks; a track-screen readout in Tesla's photos shows about 5,500 psi (380 bar) (cellcog.ai analysis; Electrek). Not confirmed by Tesla." },
   rearThrust: { newtons: 80000, source: "Tesla's claim of more than 80 kN from the rear cold-gas thrusters (Drivespark; Tech Insider). Single-source, unverified." },
-  mass: { kg: 2100, range: [1900, 2350], source: "No official weight. Third-party estimates 1,800–2,350 kg (cellcog.ai); a Model S Plaid is 2,190 kg (Tesla UK spec). 2,100 kg taken for the car without its air and tanks." },
-  power: { watts: 760000, range: [700000, 1000000], source: "Model S Plaid peak power 760 kW (Tesla; InsideEVs). The Roadster's three motors are assumed to be at least this." },
-  suction: { kg: 2000, range: [1000, 2000], source: "McMurtry Spéirling fan car: about 2,000 kg of downforce at a standstill (McMurtry, via Wikipedia). Tesla says the Roadster uses suction; its figure is not published." },
+  mass: { kg: 1800, range: [1700, 2100], source: "Lightest trim about 1,700 kg (InsideEVs, from the reveal); the Rocket adds nozzles, valves and plumbing, taken as +100 kg. Tanks and air are added separately." },
+  power: { watts: 1000000, range: [800000, 1000000], source: "Over 800 kW base, over 1,000 kW top trims; two motors, rear-wheel drive only (InsideEVs full specs)" },
+  driven: { share: 0.55, source: "Rear-wheel drive: the driven wheels carry about 55% of the load in a mid-engined layout (typical; assumed)" },
+  suction: { kg: 1060, range: [700, 2000], source: "Lars Moravy: tyres alone ≈ 1.26 g, with the fans the car corners above 2 g (Teslarati; Drive Tesla Canada). That needs downforce ≈ (2/1.26 − 1) × weight ≈ 0.59 × 1,800 kg. Upper end: McMurtry Spéirling's 2,000 kg (Wikipedia). Four electric fans at the rear (patent, via CarBuzz)." },
+  loop: { radius: 9.5, source: "The inverted half-loop's top was about 65 ft (≈ 20 m) up on the broadcast overlay (AGI Clock); a half-loop that tall has a radius of about 9.5 m. Radius itself not published." },
   grip: { mu: 1.1, range: [1.0, 1.3], source: "Road tyre on dry asphalt, about 1.0–1.3 (typical; assumed)" },
   isp: { seconds: 69, range: [62, 76], source: "Cold nitrogen thruster, measured: 69 s (Univ. of Maryland SSL, vacuum) to 75.6 s (Beihang micro-thruster); ideal air 91 s (arXiv 1812.11662). Sea level costs a little more; 69 s taken." },
   compressibility: { bar: [0, 150, 300, 400], z: [1, 1, 1.1089, 1.2073], source: "Air at 300 K: Z = 1.1089 at 300 bar, 1.2073 at 400 bar (Wikipedia air table). Below 150 bar taken as 1." },
@@ -39,9 +41,8 @@ export const PARAMS = {
   retro: false,
   cutoff: 0,
   hopSpeed: 14,
-  rampSpeed: 22,
-  rampAngle: 22,
-  rampHeight: 1.6,
+  loopSpeed: 20,
+  loopRadius: 9.5,
   hoverGoal: 10,
 };
 
@@ -53,9 +54,9 @@ export const CONTROLS = {
 };
 
 export const SCENARIOS = [
-  { id: "how", name: "How it works", story: "Two carbon tanks of air at 380 bar feed ten nozzles round the body: two push, four lift, four roll." },
+  { id: "how", name: "How it works", story: "Two carbon tanks of air behind the seats feed ten nozzles: four under the rear plate push, two at the nose and four on the sills lift and roll. Four fans at the tail suck the car onto whatever it drives on." },
   { id: "launch", name: "Launch", story: "Standing start on the test track: tyres, suction and the rear thrusters together, 0 to 60 mph." },
-  { id: "flip", name: "Kickflip", story: "Off a kicker ramp at 50 mph, the roll thrusters turn the car a full circle in the air before it lands." },
+  { id: "loop", name: "Inverted ramp", story: "Up a half-loop 19 m tall: the car climbs the wall, drives upside down along the overhang, lets go at the top, rolls upright in the air on its thrusters and lands." },
   { id: "hop", name: "Hop the row", story: "Rolling at 30 mph, the lift thrusters throw the car over a row of parked vehicles, a semi-truck the tallest." },
   { id: "hover", name: "Fly", story: "From a standstill, lift off and hold 2 m in the air for 10 seconds: real flight, not a hop." },
   { id: "cold", name: "Cold tanks", story: "The longest burn empties the tanks fast. Expanding air cools, and the tank liner has a cold limit." },
@@ -141,7 +142,7 @@ function simLaunch(p, env) {
   const track = [];
   while (v < MPH60 && t < 5) {
     const m = M + tank.mass;
-    const tyre = Math.min(mu * (m * GAS.g + suction), P / Math.max(v, 0.5));
+    const tyre = Math.min(mu * DATA.driven.share * (m * GAS.g + suction), P / Math.max(v, 0.5));
     const thrust = tank.fire(A, 1e9, DT);
     v += ((tyre + thrust) / m) * DT;
     x += v * DT;
@@ -152,42 +153,80 @@ function simLaunch(p, env) {
   return { time: t, used: tank.m0 - tank.mass, share: 1 - tank.mass / tank.m0, track };
 }
 
-function rollInertia(m) {
-  return (m * (2.0 ** 2 + 1.15 ** 2)) / 12;
-}
 
-function simFlip(p, env) {
+// The inverted half-loop. On the deck: the car climbs a circle of radius r, θ from 0 (bottom)
+// to π (top, upside down). The deck pushes on the tyres with N = m v²/r + m g cos θ; the fans add
+// suction S. Grip is lost if N + S falls to zero. The motors drive the rear tyres up the curve.
+// At the top the car lets go upside down, rolls 180° on its sill nozzles, then brakes the fall late.
+function simLoop(p, env) {
   const tank = tankOf(p, env);
+  const r = p.loopRadius;
+  const P = env.power ?? DATA.power.watts;
+  const mu = env.mu ?? DATA.grip.mu;
+  const S = (env.suction ?? DATA.suction.kg) * GAS.g;
   const m0 = massOf(p, env);
-  const arm = 0.9;
-  const Arole = rearArea(env) * 0.5;
-  const a = (p.rampAngle * Math.PI) / 180;
-  let x = 0, z = p.rampHeight, vx = p.rampSpeed * Math.cos(a), vz = p.rampSpeed * Math.sin(a);
-  let roll = 0, w = 0, t = 0;
-  const goal = 2 * Math.PI;
   const track = [];
-  while ((z > 0 || t < 0.05) && t < 6) {
+  let th = 0, v = p.loopSpeed, t = 0, minGrip = Infinity, fell = false;
+  while (th < Math.PI && t < 10) {
+    const m = m0 - (tank.m0 - tank.mass);
+    const N = (m * v * v) / r + m * GAS.g * Math.cos(th);
+    const grip = (N + S) / (m * GAS.g);
+    minGrip = Math.min(minGrip, grip);
+    if (N + S <= 0) { fell = true; break; }
+    const drive = Math.min(mu * DATA.driven.share * (N + S), P / Math.max(v, 1));
+    v += ((drive - m * GAS.g * Math.sin(th)) / m) * DT;
+    if (v <= 0.5) { fell = true; break; }
+    th += (v * DT) / r;
+    t += DT;
+    if (track.length === 0 || t - track[track.length - 1].t >= 0.02) track.push({ t, x: -r * Math.sin(th), z: r - r * Math.cos(th), roll: 0, pitch: th, v, bar: tank.bar, T: tank.T, jets: {}, on: true });
+  }
+  // Released at the top: upside down, moving the other way along the lane at speed v.
+  const A = p.liftArea * 1e-4;
+  const Aroll = rearArea(env) * 0.5;
+  const arm = 0.9;
+  // At the top (θ = π) the car runs along +x, upside down.
+  let x = -r * Math.sin(th), z = r - r * Math.cos(th), vx = v, vz = 0;
+  let roll = 0, w = 0, braking = false;
+  const goal = Math.PI;
+  while (!fell && t < 14) {
     const m = m0 - (tank.m0 - tank.mass);
     const I = rollInertia(m);
-    const Fmax = Math.min(p.rollThrust, tank.maxThrust(Arole));
+    const Fmax = Math.min(p.rollThrust, tank.maxThrust(Aroll));
     const alpha = (Fmax * arm) / I;
     const left = goal - roll;
-    const braking = left <= (w * w) / (2 * Math.max(alpha, 1e-6)) + 1e-4;
-    let F = 0;
-    if (left > 0.002 || Math.abs(w) > 0.01) F = tank.fire(Arole, Fmax, DT) * (braking ? -1 : 1);
-    w += ((F * arm) / I) * DT;
-    if (braking && w < 0) w = 0;
+    const stopping = left <= (w * w) / (2 * Math.max(alpha, 1e-6)) + 1e-4;
+    let Fr = 0;
+    if (left > 0.002 || Math.abs(w) > 0.01) Fr = tank.fire(Aroll, Fmax, DT) * (stopping ? -1 : 1);
+    w += ((Fr * arm) / I) * DT;
+    if (stopping && w < 0) w = 0;
     roll += w * DT;
-    vz -= GAS.g * DT;
+    // Lift nozzles push the right way only once the car is nearly upright.
+    let F = 0;
+    const upright = Math.cos(Math.PI - roll) > 0.9;
+    if (p.retro && upright && vz < -1) {
+      const amax = tank.maxThrust(A) / m - GAS.g;
+      const stop = amax > 0 ? (vz * vz - 1) / (2 * amax) : Infinity;
+      if (braking || z - 0.1 <= stop * 1.6) {
+        braking = true;
+        F = tank.fire(A, m * ((vz * vz - 1) / (2 * Math.max(z - 0.1, 0.05)) + GAS.g), DT);
+      }
+    }
+    vz += (F / m - GAS.g) * DT;
     x += vx * DT;
     z += vz * DT;
     t += DT;
-    if (track.length === 0 || t - track[track.length - 1].t >= 0.02) track.push({ t, x, z: Math.max(0, z), roll, pitch: 0, v: vx, bar: tank.bar, T: tank.T, jets: { roll: F } });
+    if (track.length === 0 || t - track[track.length - 1].t >= 0.02) track.push({ t, x, z: Math.max(0, z), roll: Math.PI - roll, pitch: Math.PI, v: vx, bar: tank.bar, T: tank.T, jets: { roll: Fr, lift: F }, on: false });
+    if (z <= 0) break;
   }
-  const error = Math.abs(((roll % goal) + goal) % goal);
-  const off = Math.min(error, goal - error);
-  track.push({ t, x, z: 0, roll, pitch: 0, v: vx, bar: tank.bar, T: tank.T, jets: {} });
-  return { airtime: t, rollError: (off * 180) / Math.PI, used: tank.m0 - tank.mass, track };
+  const off = Math.abs(((Math.PI - roll) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI));
+  const rollError = (Math.min(off, 2 * Math.PI - off) * 180) / Math.PI;
+  const sink = Math.max(0, -vz);
+  track.push({ t, x, z: 0, roll: Math.PI - roll, pitch: Math.PI, v: vx, bar: tank.bar, T: tank.T, jets: {}, on: false });
+  return { minGrip, fell, topSpeed: v, rollError, sink, g: fell ? 99 : landingG(sink, env), used: tank.m0 - tank.mass, track, radius: r };
+}
+
+function rollInertia(m) {
+  return (m * (2.0 ** 2 + 1.1 ** 2)) / 12;
 }
 
 function landingG(sink, env) {
@@ -205,8 +244,11 @@ function simHop(p, env) {
   let braking = false;
   let clearance = Infinity;
   const track = [];
-  // Start the burn so the apex lands over the row: burn plus climb take about 1.4 s.
-  const lead = p.hopSpeed * 1.4;
+  // Start the burn so the apex lands over the row: the time to apex is the burn (from the
+  // nozzles' thrust now) plus the coast up, taken from the climb speed the jump needs.
+  const vUp = Math.sqrt(2 * GAS.g * (rowH + 0.6));
+  const aUp = Math.max(0.5, tank.maxThrust(A) / m0 - GAS.g);
+  const lead = p.hopSpeed * (vUp / aUp + vUp / GAS.g * 0.85);
   while (t < 8) {
     const m = m0 - (tank.m0 - tank.mass);
     let F = 0;
@@ -272,7 +314,7 @@ function simHover(p, env) {
 }
 
 // ── State and checks ─────────────────────────────────────────────────────────
-const SHORT = { launch: ["0–60 in", "too slow"], roll: ["lands", "off its wheels"], clear: ["clears by", "hits the row"], land: ["landing", "breaks"], hover: ["flies", "falls"], cold: ["tank", "too cold"] };
+const SHORT = { grip: ["grip", "falls off"], launch: ["0–60 in", "too slow"], roll: ["lands", "off its wheels"], clear: ["clears by", "hits the row"], land: ["landing", "breaks"], hover: ["flies", "falls"], cold: ["tank", "too cold"] };
 function check(id, label, value, mark, unit, sense, confidence, fmt, say) {
   const pass = sense === "under" ? value <= mark : value >= mark;
   const margin = sense === "under" ? mark / Math.max(value, 1e-9) : value / mark;
@@ -291,9 +333,11 @@ export function stateOf(p, scenario, env = {}) {
     checks.push(check("launch", "0–60 mph", s.time, 1.0, "s", "under", "medium", (v) => `${v.toFixed(2)} s`, (ok, v) => (ok ? `0–60 mph in ${v.toFixed(2)} s, but it spends ${Math.round(s.used)} kg of air (${Math.round(s.share * 100)}% of the tanks) doing it` : `0–60 mph in ${v.toFixed(2)} s, slower than the sub-second claim`)));
     return { scenario, ...s, checks };
   }
-  if (scenario === "flip") {
-    const s = simFlip(p, env);
-    checks.push(check("roll", "Roll error at touchdown", s.rollError, 10, "°", "under", "medium", (v) => `${Math.round(v)}° off`, (ok, v) => (ok ? `completes the full turn in ${s.airtime.toFixed(1)} s of air and lands within ${Math.round(v)}° of level` : `the roll thrusters can't finish the turn in ${s.airtime.toFixed(1)} s of air: it lands ${Math.round(v)}° off its wheels`)));
+  if (scenario === "loop") {
+    const s = simLoop(p, env);
+    checks.push(check("grip", "Grip on the overhang", s.minGrip, 0.25, "g", "over", "medium", (v) => `${v.toFixed(1)} g`, (ok, v) => (ok ? `stays pressed to the deck with ${v.toFixed(1)} g to spare upside down at ${s.topSpeed.toFixed(0)} m/s. Speed alone does most of it: above ${Math.sqrt(GAS.g * p.loopRadius).toFixed(1)} m/s at the top the curve holds the car without the fans` : `loses the deck: grip falls to ${v.toFixed(1)} g, and the car drops off the overhang`)));
+    checks.push(check("roll", "Roll error at touchdown", s.rollError, 10, "°", "under", "medium", (v) => `${Math.round(v)}° off`, (ok, v) => (ok ? `rolls upright in the air and lands within ${Math.round(v)}° of level` : `can't finish the half-roll before the ground: lands ${Math.round(v)}° off its wheels`)));
+    checks.push(check("land", "Landing load", s.g, DATA.bump.g, "g", "under", "low", (v) => `${v.toFixed(1)} g`, (ok, v) => (ok ? `brakes the ${(2 * p.loopRadius).toFixed(0)} m drop and touches down at ${s.sink.toFixed(1)} m/s: ${v.toFixed(1)} g` : `falls ${(2 * p.loopRadius).toFixed(0)} m and hits at ${s.sink.toFixed(1)} m/s: ${Math.round(v)} g through the suspension, against a 3 g design load`)));
     return { scenario, ...s, checks };
   }
   if (scenario === "hop") {
@@ -313,7 +357,7 @@ export function stateOf(p, scenario, env = {}) {
 
 const RANGES = {
   launch: (r) => ({ mass: lerp(DATA.mass.range, r()), power: lerp(DATA.power.range, r()), suction: lerp(DATA.suction.range, r()), mu: lerp(DATA.grip.range, r()), isp: lerp(DATA.isp.range, r()) }),
-  flip: (r) => ({ mass: lerp(DATA.mass.range, r()), isp: lerp(DATA.isp.range, r()) }),
+  loop: (r) => ({ mass: lerp(DATA.mass.range, r()), isp: lerp(DATA.isp.range, r()), suction: lerp(DATA.suction.range, r()), power: lerp(DATA.power.range, r()), travel: lerp(DATA.travel.range, r()) }),
   hop: (r) => ({ mass: lerp(DATA.mass.range, r()), isp: lerp(DATA.isp.range, r()), travel: lerp(DATA.travel.range, r()) }),
   hover: (r) => ({ mass: lerp(DATA.mass.range, r()), isp: lerp(DATA.isp.range, r()) }),
   cold: (r) => ({ mass: lerp(DATA.mass.range, r()), isp: lerp(DATA.isp.range, r()) }),
@@ -360,6 +404,7 @@ export function campaign(p) {
 
 const LEVERS = [
   { key: "retro", values: [true], fixes: ["land"] },
+  { key: "loopSpeed", values: [24, 28], fixes: ["grip"] },
   { key: "cutoff", values: [150, 200, 250], fixes: ["cold"] },
   { key: "liftArea", values: [18, 24], fixes: ["hover", "clear"] },
   { key: "litres", values: [900, 1200], fixes: ["hover"] },

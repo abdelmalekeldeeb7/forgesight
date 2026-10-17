@@ -9,7 +9,8 @@ const svg = stage.querySelector("svg");
 const consoleSvg = stage.querySelector(".rr-console svg");
 const carG = svg.querySelector('[data-part="car"]');
 const shadowG = svg.querySelector('[data-part="shadow"]');
-const propEls = D.PROPS.map((p) => ({ ...p, el: svg.querySelector(`[data-prop="${p.id}"]`) }));
+const propEls = D.PROPS.map((p) => ({ ...p, depth: depthOf(p.at, P), el: svg.querySelector(`[data-prop="${p.id}"]`) })).sort((a, b) => a.depth - b.depth);
+let lastFront = -1;
 const knobEls = Object.fromEntries([...consoleSvg.querySelectorAll("[data-control]")].map((el) => [el.dataset.control, el]));
 const gaugesG = consoleSvg.querySelector('[data-part="gauges"]');
 const readout = root.querySelector("[data-readout]");
@@ -28,7 +29,7 @@ const knobAt = Object.fromEntries(Object.keys(knobEls).map((key) => [key, M.CONT
 const ease = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const NAMES = Object.fromEntries(M.SCENARIOS.map((s) => [s.id, s.name]));
-const SPEED = { launch: 0.4, flip: 0.6, hop: 0.8, hover: 1, cold: 1 };
+const SPEED = { launch: 0.4, loop: 0.6, hop: 0.8, hover: 1, cold: 1 };
 
 const LEVER_WORDS = {
   retro: (a, b) => `landing burst ${a ? "on" : "off"} → ${b ? "on" : "off"}`,
@@ -37,14 +38,14 @@ const LEVER_WORDS = {
   cutoff: (a, b) => `low-pressure cutoff ${a ? a + " bar" : "off"} → ${b} bar`,
 };
 const WHY = {
-  how: "Jarvis view: the parts hang apart, then pull together. Two carbon-wrapped tanks hold about 228 kg of air at 380 bar (5,500 psi). A block of fast valves feeds ten nozzles: two at the tail push the car forward, four under the corners lift it, and four along the sills roll it. Each nozzle is a small cold-gas rocket: air rushes out at the speed of sound and the car is pushed the other way. No fuel burns.",
+  how: "Jarvis view: the parts hang apart, then pull together. Two carbon-wrapped tanks across the car behind the seats hold about 228 kg of air at around 380 bar. A block of fast valves feeds ten nozzles: four in a row under the rear plate push the car forward and a little up; two under the nose and four on the sills lift it, and the sills on one side alone roll it. Each nozzle is a small cold-gas rocket: air leaves at the speed of sound and pushes the car the other way. Nothing burns. Four electric fans in the tail suck air from under the car, and skirts along the sills seal it, so the car is pressed onto whatever it drives on, even a ceiling. The shape is a stand-in drawn from the reveal coverage: a white faceted wedge with light bars at both ends, a small set-back canopy and a flush rear wing.",
   launch: "Tyres and air together: suction under the car presses the tyres down so they grip harder, the motors drive them, and the tail nozzles add more than 80 kN, about four times a family car's tyres can give. The model is checked against Tesla's own figures: 0.81 s at the demo, 0.55 s claimed for the Rocket.",
-  flip: "Off the kicker the car is a thrown stone: its path is set the moment it leaves the lip. Only the sill nozzles act, one side firing down to spin it, then the other side to stop the spin, so it comes round a full turn and lands on its wheels.",
+  loop: "Round a loop the deck has to push the car toward the centre to bend its path, so at speed the curve itself presses the tyres on, even upside down, as on a roller-coaster. The fans add suction for when the car is slow. At the top the car lets go, upside down, 19 m up. The sills on one side fire to roll it over, the other side stops the roll, and once the wheels face the ground the lift nozzles brake the fall.",
   hop: "To clear a semi-truck the lift nozzles must throw 2.5 tonnes about 5 m up. Coming down from that height the car falls at about 10 m/s, and its suspension has only 15 cm to stop it.",
   hover: "Hovering means pushing up with the car's whole weight, all the time. Cold air is a weak rocket: holding 2.5 tonnes up burns about 36 kg of air every second. As the tanks empty the pressure falls, and once the nozzles can't push the weight any more, the car sinks.",
   cold: "Air expanding out of a tank cools the air left behind: the faster you empty it, the colder it gets. The plastic liner inside a carbon tank is rated to −40 °C. Here the bodywork is lifted off to show the tanks. The model gives no heat back from the tank walls, so this is the cold side of the truth.",
 };
-const SPREAD = { launch: "Across the car's weight, motor power, suction, grip and nozzle efficiency", flip: "Across weight and nozzle efficiency", hop: "Across weight, nozzle efficiency and suspension travel", hover: "Across weight and nozzle efficiency", cold: "Across weight and nozzle efficiency" };
+const SPREAD = { launch: "Across the car's weight, motor power, suction, grip and nozzle efficiency", loop: "Across weight, motor power, suction, nozzle efficiency and suspension travel", hop: "Across weight, nozzle efficiency and suspension travel", hover: "Across weight and nozzle efficiency", cold: "Across weight and nozzle efficiency" };
 
 let act = "how";
 let mode = "play";
@@ -61,8 +62,8 @@ let apartTarget = 0;
 let apartNow = 0;
 
 function tourSteps() {
-  const steps = [{ act: "how" }, { act: "launch" }, { act: "flip" }];
-  for (const id of ["hop", "hover", "cold"]) {
+  const steps = [{ act: "how" }, { act: "launch" }];
+  for (const id of ["loop", "hop", "hover", "cold"]) {
     steps.push({ act: id });
     for (const fix of FIXES.filter((f) => f.act === id)) steps.push({ act: id, mode: "fix", fix });
     if (FIXES.some((f) => f.act === id)) steps.push({ act: id });
@@ -84,7 +85,7 @@ function sample(track, t) {
   for (let i = 1; i < track.length; i++) if (track[i].t >= t) {
     const a = track[i - 1], b = track[i], f = (t - a.t) / (b.t - a.t || 1);
     const mix = (u, v) => u + (v - u) * f;
-    return { t, x: mix(a.x, b.x), z: mix(a.z, b.z), roll: mix(a.roll, b.roll), v: mix(a.v, b.v), bar: mix(a.bar, b.bar), T: mix(a.T, b.T), jets: f < 0.5 ? a.jets : b.jets };
+    return { t, x: mix(a.x, b.x), z: mix(a.z, b.z), roll: mix(a.roll, b.roll), pitch: mix(a.pitch ?? 0, b.pitch ?? 0), v: mix(a.v, b.v), bar: mix(a.bar, b.bar), T: mix(a.T, b.T), jets: f < 0.5 ? a.jets : b.jets, on: f < 0.5 ? a.on : b.on };
   }
   return track[track.length - 1];
 }
@@ -112,6 +113,8 @@ function frameOf(id, m, t) {
     if (t > 7.6 && t < 8.3) jets.roll = -0.8;
     out.pose.apart = 1 - ease((t - 0.8) / 3);
     out.pose.jets = jets;
+    // Turn the car to show its tail (fans, rear nozzles) while the rear jets fire, then back.
+    out.pose.yaw = -2.25 * (ease((t - 3.9) / 0.5) - ease((t - 5.3) / 0.5));
     return out;
   }
   const s = stateFor(id);
@@ -129,26 +132,24 @@ function frameOf(id, m, t) {
     out.cam = { at: [x * 100 + 150, D.LANE.launch, 60], zoom: 1.5 };
     return out;
   }
-  if (id === "flip") {
-    const v = params.rampSpeed, a = (params.rampAngle * Math.PI) / 180;
-    const rampLen = D.RAMP.len / 100;
+  if (id === "loop") {
+    const r = D.LOOP.r;
     let pose;
     if (t < 0.8) {
-      // Run-up and climb: 0.8 s before the lip, along the lane then up the deck.
-      const back = (0.8 - t) * v * SPEED.flip * 1.25;
-      const xr = -back;
-      const onDeck = xr > -rampLen;
-      const z = onDeck ? (params.rampHeight * (xr + rampLen)) / rampLen : 0;
-      pose = { x: D.RAMP.x + xr * 100, y: D.LANE.flip, z: z * 100, pitch: onDeck ? a : 0, roll: 0 };
+      // Run-in along the lane toward the loop, nose first (the car faces −x).
+      const back = (0.8 - t) * params.loopSpeed * SPEED.loop * 100;
+      pose = { x: D.LOOP.x + back, y: D.LANE.flip, z: 0, yaw: Math.PI };
+    } else if (k.on) {
+      // On the deck: the car's middle sits 55 cm inside the circle, pitched along it.
+      const th = k.pitch;
+      pose = { x: D.LOOP.x - (r - 55) * Math.sin(th), y: D.LANE.flip, z: r - (r - 55) * Math.cos(th) - 55, yaw: Math.PI, pitch: th };
     } else {
       const over = Math.max(0, T - end);
-      const fly = clamp(T / end, 0, 1);
-      pose = { x: D.RAMP.x + (k.x + v * Math.cos(a) * over * 0.6) * 100, y: D.LANE.flip, z: k.z * 100, roll: k.roll, pitch: a * (1 - ease(fly * 1.4)), jets: { roll: T <= end ? Math.sign(k.jets.roll ?? 0) * share(k.jets.roll, params.rollThrust) : 0 } };
+      const lit = failing("loop", "land") && T >= end ? { wheels: true, body: true } : {};
+      pose = { x: D.LOOP.x + (k.x + k.v * Math.min(over, 1) * 0.4) * 100, y: D.LANE.flip, z: k.z * 100, yaw: Math.PI, pitch: Math.PI, roll: Math.PI - k.roll, jets: T <= end ? { roll: Math.sign(k.jets.roll ?? 0) * share(k.jets.roll, params.rollThrust), lift: share(k.jets.lift, 60000) } : {}, lit };
     }
     out.pose = pose;
-    // Follow the car, but keep the lip of the ramp in shot until the car is well clear of it.
-    const cx = Math.max(pose.x + 150, Math.min(D.RAMP.x + 900, pose.x + 700));
-    out.cam = { at: [cx, D.LANE.flip, 80 + pose.z * 0.5], zoom: 0.8 };
+    out.cam = { at: [Math.min(pose.x, D.LOOP.x + 1800) - 150, D.LANE.flip, Math.max(500, pose.z * 0.7 + 250)], zoom: 0.5 };
     return out;
   }
   if (id === "hop") {
@@ -188,13 +189,15 @@ function paint(f) {
   const pose = { ...f.pose, apart: Math.max(f.pose.apart ?? 0, apartNow) };
   carG.innerHTML = CARS.car(pose);
   shadowG.innerHTML = CARS.shadow(pose);
-  // Props in front of the car are drawn after it, props behind before it.
+  // Props in front of the car are drawn after it, props behind before it, each side kept in depth order.
   const carDepth = depthOf([pose.x, pose.y, (pose.z ?? 0) + 55], P);
-  for (const p of propEls) {
-    const front = depthOf(p.at, P) > carDepth;
-    const placed = p.el.compareDocumentPosition(carG) & Node.DOCUMENT_POSITION_FOLLOWING ? "before" : "after";
-    if (front && placed === "before") carG.after(p.el);
-    if (!front && placed === "after") carG.before(p.el);
+  const front = propEls.filter((p) => p.depth > carDepth);
+  const key = front.length;
+  if (key !== lastFront) {
+    lastFront = key;
+    for (const p of propEls) if (p.depth <= carDepth) carG.before(p.el);
+    let cursor = carG;
+    for (const p of front) { cursor.after(p.el); cursor = p.el; }
   }
   // Camera: the card is a window centred near the action.
   const c = iso(f.cam.at, P);
@@ -252,7 +255,7 @@ function caption() {
   if (act === "hover" && LIMITS.some((l) => l.act === "hover")) lines.push(`<b>No fix:</b> no change on the console makes this hold. Bigger tanks add carbon as fast as they add air, and bigger nozzles only spend it faster. Cold air can make a car hop, not fly.`);
   if (fixing) lines.push(`<b>Fix:</b> ${LEVER_WORDS[fixing.key](fixing.from, fixing.to)} (${fixing.cost >= 0 ? "+" : ""}${fixing.cost.toFixed(0)} kg). Same act again next.`);
   if (act === "launch") lines.push("Shown at 0.4× speed.");
-  if (act === "flip") lines.push("Shown at 0.6× speed.");
+  if (act === "loop") lines.push("Shown at 0.6× speed. The loop's height comes from the broadcast overlay; its radius, the entry speed and the steelwork are stand-ins.");
   return lines.join(" ");
 }
 function say() {
@@ -366,7 +369,7 @@ stage.addEventListener("keydown", (event) => {
 });
 
 // ── The report ───────────────────────────────────────────────────────────────
-const KEY_TIME = { launch: (s) => 0.8 + endOf(s.track) / SPEED.launch, flip: (s) => 0.8 + (endOf(s.track) * 0.45) / SPEED.flip, hop: (s) => 0.8 + (s.track.reduce((b, p) => (p.z > b.z ? p : b)).t) / SPEED.hop, hover: (s) => 0.8 + (endOf(s.track) * 0.4) / SPEED.hover, cold: (s) => 0.8 + endOf(s.track) / SPEED.cold };
+const KEY_TIME = { launch: (s) => 0.8 + endOf(s.track) / SPEED.launch, loop: (s) => 0.8 + (s.track.find((p) => !p.on)?.t ?? endOf(s.track) * 0.5) / SPEED.loop + 0.15, hop: (s) => 0.8 + (s.track.reduce((b, p) => (p.z > b.z ? p : b)).t) / SPEED.hop, hover: (s) => 0.8 + (endOf(s.track) * 0.4) / SPEED.hover, cold: (s) => 0.8 + endOf(s.track) / SPEED.cold };
 function cardSvg(id) {
   const f = frameOf(id, "play", KEY_TIME[id](stateFor(id)));
   const saved = { car: carG.innerHTML, shadow: shadowG.innerHTML, vb: svg.getAttribute("viewBox"), gauges: gaugesG.innerHTML };
@@ -411,7 +414,7 @@ function renderSummary() {
   const refill = items.pop().refill;
   const lo = items.reduce((a, b) => a + b.low, 0), hi = items.reduce((a, b) => a + b.high, 0);
   const table = `<table class="rr-bom"><thead><tr><th>Part</th><th>Cost</th><th>Where the number comes from</th></tr></thead><tbody>${items.map((b) => `<tr><td>${b.part}</td><td>${usd(b.low)}–${usd(b.high)}</td><td>${b.source}</td></tr>`).join("")}<tr><td><b>The air system</b></td><td><b>${usd(lo)}–${usd(hi)}</b></td><td>Low confidence: one-off parts at prototype prices, not Tesla's costs</td></tr></tbody></table>`;
-  summaryEl.innerHTML = `<div class="fg-cards">${cards.join("")}</div><div class="fg-verdict"><span>${verdictLine}</span><span>${fixes}</span><span><b>Mass:</b> ${Math.round(M.massOf(params))} kg with ${Math.round(M.airMass(params))} kg of air in ${Math.round(M.tankMass(params))} kg of carbon tanks. <b>Turnaround:</b> refilling ${Math.round(M.airMass(params))} kg of air takes about ${refill.toFixed(0)} hours on a dive-shop compressor (315 L/min); a launch alone spends ${Math.round(stateFor("launch").used)} kg.</span>${table}<span><b>How sure:</b> medium on the launch, kickflip and hop, which rest on Tesla's own 80 kN and 380 bar figures, a real-gas air table and checked rocket formulas. Low on the landing (suspension travel and its 3 g design load are rules of thumb) and on the cold (no heat from the tank walls). Tesla has not published the car's weight, tank pressure or thrust, so every one of those is a reported or estimated figure, listed with its source in the model.</span><span><b>Before trusting it:</b> run every burst with no one in the car, as Tesla did; fill and empty the tanks behind a blast wall with thermocouples on the liner; drop-test the suspension from the hop's height before the first real landing; and never fill or vent near people: the full tanks store ${(M.storedEnergy(params) / 1e6).toFixed(0)} MJ, the burst energy of about ${Math.round(M.storedEnergy(params) / 4.184e6)} kg of TNT.</span></div>`;
+  summaryEl.innerHTML = `<div class="fg-cards">${cards.join("")}</div><div class="fg-verdict"><span>${verdictLine}</span><span>${fixes}</span><span><b>Mass:</b> ${Math.round(M.massOf(params))} kg with ${Math.round(M.airMass(params))} kg of air in ${Math.round(M.tankMass(params))} kg of carbon tanks. <b>Turnaround:</b> refilling ${Math.round(M.airMass(params))} kg of air takes about ${refill.toFixed(0)} hours on a dive-shop compressor (315 L/min); a launch alone spends ${Math.round(stateFor("launch").used)} kg.</span>${table}<span><b>How sure:</b> medium on the launch, the inverted ramp and the hop, which rest on Tesla's own 80 kN and 380 bar figures, a real-gas air table and checked rocket formulas. Low on the landing (suspension travel and its 3 g design load are rules of thumb) and on the cold (no heat from the tank walls). Tesla has not published the car's weight, tank pressure or thrust, so every one of those is a reported or estimated figure, listed with its source in the model.</span><span><b>Before trusting it:</b> run every burst with no one in the car, as Tesla did; fill and empty the tanks behind a blast wall with thermocouples on the liner; drop-test the suspension from the hop's height before the first real landing; and never fill or vent near people: the full tanks store ${(M.storedEnergy(params) / 1e6).toFixed(0)} MJ, the burst energy of about ${Math.round(M.storedEnergy(params) / 4.184e6)} kg of TNT.</span></div>`;
 }
 
 new IntersectionObserver((entries) => { visible = entries[entries.length - 1].isIntersecting; if (visible) run(); }, { rootMargin: "120px 0px" }).observe(stage);
