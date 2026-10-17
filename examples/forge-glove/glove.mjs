@@ -4,7 +4,10 @@ export function makeGlove(k, G, M, P, Z0) {
   const D = (points, style) => k.dotsSvg(points, style);
   // The hand can roll about the forearm axis (to turn the palm and its repulsor to the viewer).
   let ROLL = 0;
+  // While an armour part is drawn in the exploded view, OFF lifts it off the hand.
+  let OFF = null;
   const R = (p) => {
+    if (OFF) p = [p[0] + OFF[0], p[1] + OFF[1], p[2] + OFF[2]];
     if (!ROLL) return p;
     const c = Math.cos(ROLL), s = Math.sin(ROLL), dz = p[2] - Z0;
     return [p[0], p[1] * c - dz * s, Z0 + p[1] * s + dz * c];
@@ -68,9 +71,12 @@ export function makeGlove(k, G, M, P, Z0) {
     for (const [ri, other] of [[0, 1], [last, last - 1]]) {
       const nrm = G.unit3(sub(centre[ri], centre[other]));
       const spread = Math.max(...rings[ri].map((p) => G.len3(sub(p, centre[ri]))));
-      if (spread < 0.5 || G.dot3(nrm, V) <= 1e-6) continue;
-      buckets[G.bandOf(G.dot3(nrm, LIGHT))].push(k.pathOf(flat[ri], true));
+      if (spread < 0.5) continue;
+      // An end ring's edge is drawn wherever the side face beside it shows, whether
+      // the end face itself faces the viewer or turns away (then it is the plate's rim).
       for (let j = 0; j < n; j++) if (seen[ri][j]) crease.push(k.pathOf([flat[ri][j], flat[ri][(j + 1) % n]]));
+      if (G.dot3(nrm, V) <= 1e-6) continue;
+      buckets[G.bandOf(G.dot3(nrm, LIGHT))].push(k.pathOf(flat[ri], true));
     }
     const hull = G.hullOf(flat.flat());
     return { fill: k.pathOf(hull, true), outline: k.pathOf(hull, true), crease: crease.join(""), top: buckets[4].join(""), shades: buckets.slice(0, 4).map((b) => b.join("")) };
@@ -228,7 +234,7 @@ export function makeGlove(k, G, M, P, Z0) {
       const a = at(place(F, s0 + 3.2, [0, top])), b = at(place(F, s1 - 3.2, [0, top]));
       detail = `<path class="iso-line" data-tone="faint" d="M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}"/>` + D([a, b], { size: 0.45, tone: "mid" });
     }
-    return S(paths, { tone: "hi", crease: "lo", className: "im-red", ...style }) + detail;
+    return S(paths, { tone: "hi", crease: "lo", ...style }) + detail;
   }
 
   const armR = (s) => 30 - (4 * s) / 206;
@@ -336,7 +342,7 @@ export function makeGlove(k, G, M, P, Z0) {
     if (G.dot3(G.unit3(sub(R(add(o, F.a)), R(o))), V) < 0.08) return "";
     const circle = (r, s, n = 40) => Array.from({ length: n }, (_, i) => place(F, s, [r * Math.cos((i / n) * 2 * Math.PI), r * Math.sin((i / n) * 2 * Math.PI)]));
     const flatAt = (pts) => k.pathOf(pts.map(at), true);
-    const housing = S(loftOf([circle(REPULSOR.r, -1.5), circle(REPULSOR.r, 1.2), circle(REPULSOR.r - 2, 2.6)]), { tone: "hi", crease: "lo", className: "im-gold", lit: hot });
+    const housing = S(loftOf([circle(REPULSOR.r, -1.5), circle(REPULSOR.r, 1.2), circle(REPULSOR.r - 2, 2.6)]), { tone: "hi", crease: "lo", lit: hot });
     const lens = `<path class="im-lens" d="${flatAt(circle(10.5, 2.7))}"/>`;
     const core = `<path class="im-glow" d="${flatAt(circle(9, 2.8))}" style="opacity:${glow.toFixed(3)}"/>`;
     const ring = `<path class="fg-led" d="${flatAt(circle(11.6, 2.75))}" style="opacity:${(0.25 + 0.75 * glow).toFixed(3)}"/>`;
@@ -356,11 +362,23 @@ export function makeGlove(k, G, M, P, Z0) {
     const deployed = M.deployOf(p).chains;
     const lit = pose.lit ?? {};
     const plates = M.platesOf(p);
+    // Exploded view: one 0..1 value for the whole glove, staggered by each part's order
+    // (0 leaves first and lands last). Parts move along their own outward direction.
+    const S0 = pose.apart ?? 0;
+    const shareOf = (order) => {
+      const x = Math.min(1, Math.max(0, S0 * 2.2 - order * 1.2));
+      return x * x * (3 - 2 * x);
+    };
+    const moved = (vec, order, draw) => {
+      const f = shareOf(order);
+      OFF = f > 0.001 ? mul(vec, f) : null;
+      try { return draw(); } finally { OFF = null; }
+    };
     // Rolled past a quarter turn, the back of the hand faces away: armour goes behind the body.
     const flip = Math.cos(ROLL) < 0;
     push(1, 0, palm());
     const glow = pose.glow ?? 0;
-    const rep = repulsor(glow, pose.hot);
+    const rep = moved([0, 0, -34], 0.05, () => repulsor(glow, pose.hot));
     if (rep) push(1.8, 0, rep);
     // The beam is drawn in front when the palm faces the viewer, else behind the hand.
     if (pose.beam) push(flip ? 6 : -1, 0, beam(pose.beam, pose.reach ?? 140, !!pose.lands));
@@ -383,8 +401,8 @@ export function makeGlove(k, G, M, P, Z0) {
       const outer = lift + p.plateThick + 0.2;
       const surf = (x, a) => palmSection(x, outer, a, a, 2, 7 - i)[0];
       const run = (a0, a1) => { const pts = []; for (let t = 0; t <= 1.0001; t += 0.2) { const x = start + 0.2 + (end - start - 0.4) * t; pts.push(at(surf(x, a0 + (a1 - a0) * t))); } return k.pathOf(pts); };
-      const lines = end - start > 14 ? L(run(Math.PI / 2, Math.PI / 2), { tone: "lo" }) + L(run(Math.PI / 2 - 0.12, Math.PI / 2 - 0.5) + run(Math.PI / 2 + 0.12, Math.PI / 2 + 0.5), { tone: "faint" }) : "";
-      push(flip ? 0.5 : 2, i, S(loftOf(rings), { tone: "hi", crease: "lo", className: "im-red", inner: lines }) + (end - start > 20 ? D([at(section(start + 4, outer)[3]), at(section(start + 4, outer)[10])], { size: 0.4, tone: "mid" }) : ""));
+      const linesOf = () => (end - start > 14 ? L(run(Math.PI / 2, Math.PI / 2), { tone: "lo" }) + L(run(Math.PI / 2 - 0.12, Math.PI / 2 - 0.5) + run(Math.PI / 2 + 0.12, Math.PI / 2 + 0.5), { tone: "faint" }) : "");
+      push(flip ? 0.5 : 2, i, moved([0, 0, 52 + i * 22], 0.9 + i * 0.05, () => S(loftOf(rings), { tone: "hi", crease: "lo", inner: linesOf() }) + (end - start > 20 ? D([at(section(start + 4, outer)[3]), at(section(start + 4, outer)[10])], { size: 0.4, tone: "mid" }) : "")));
     });
 
     M.FINGERS.forEach((f, fi) => {
@@ -413,7 +431,10 @@ export function makeGlove(k, G, M, P, Z0) {
         const a = sizeOf(f, q.bone, 2 / f.bones[q.bone]), b = sizeOf(f, q.bone, (2 + q.len) / f.bones[q.bone]);
         // The fingertip plate stops short of the pad and rounds over the nail.
         const tipCut = q.bone === 2 ? 3 : 0;
-        if (end >= far - 0.01) push(under(j.after) ? 0 : 3, flip ? base * 100 - 8 + q.bone * 0.5 : base * 100 + q.bone * 10 + 5, plate(frame(j.at, j.after, psi), 2, 2 + q.len - tipCut, a.w + 2.4, b.w + 2.4, a.h / 2, b.h / 2, p.plateThick, style, 0, q.bone === 2));
+        if (end >= far - 0.01) {
+          const F = frame(j.at, j.after, psi);
+          push(under(j.after) ? 0 : 3, flip ? base * 100 - 8 + q.bone * 0.5 : base * 100 + q.bone * 10 + 5, moved(add(mul(F.v, 34 + q.bone * 10), mul(F.a, 8 + q.bone * 10)), 0.3 + fi * 0.1 + q.bone * 0.05, () => plate(F, 2, 2 + q.len - tipCut, a.w + 2.4, b.w + 2.4, a.h / 2, b.h / 2, p.plateThick, style, 0, q.bone === 2)));
+        }
         else {
           const mid = rail.along((start + end) / 2);
           push(3, base * 100 + 90 + q.bone, plate(frame(mid.o, mid.phi, mid.psi), -(end - start) / 2, (end - start) / 2, a.w + 2.4, b.w + 2.4, HALF, HALF, p.plateThick, style));
@@ -446,7 +467,7 @@ export function makeGlove(k, G, M, P, Z0) {
             const start = Math.max(end - 9, 0);
             if (end - start < 0.8) return;
             const mid = rail.along((start + end) / 2);
-            push(3, base * 100 + 95 + ji + li * 0.1, plate(frame(mid.o, mid.phi, mid.psi), -(end - start) / 2, (end - start) / 2, lw, lw, HALF, HALF, p.plateThick, { className: "im-gold" }, 0.6 + li * 0.45));
+            push(3, base * 100 + 95 + ji + li * 0.1, plate(frame(mid.o, mid.phi, mid.psi), -(end - start) / 2, (end - start) / 2, lw, lw, HALF, HALF, p.plateThick, {}, 0.6 + li * 0.45));
             return;
           }
           let o, phi;
@@ -456,9 +477,8 @@ export function makeGlove(k, G, M, P, Z0) {
           const edge = gap && (li === Math.ceil(n / 2) - 1 || li === Math.ceil(n / 2));
           const popped = pose.pop && pose.pop.finger === fi && pose.pop.joint === ji && li === n - 1;
           if (popped) { o = add(o, [0, 11 * pose.pop.t, 7 * pose.pop.t]); phi -= 0.7 * pose.pop.t; }
-          // Knuckle guards and joint lames are the gold accents.
-          const gold = { className: "im-gold" };
-          push(popped ? 5 : under(phi) ? 0 : 3, flip ? base * 100 - 9 + ji * 0.3 + li * 0.05 : base * 100 + ji * 10 + 7 + li * 0.1, plate(frame(o, phi, psi), -4.5, 4.5, lw + (ji === 0 ? 1.5 : 0), lw * 0.96, half, half, p.plateThick + (ji === 0 ? 0.8 : 0), (edge && lit.gaps) || (popped && pose.pop.t > 0.02) ? { lit: true, ...gold } : gold, 0.6 + li * 0.45));
+          const LF = frame(o, phi, psi);
+          push(popped ? 5 : under(phi) ? 0 : 3, flip ? base * 100 - 9 + ji * 0.3 + li * 0.05 : base * 100 + ji * 10 + 7 + li * 0.1, moved(add(mul(LF.v, 22 + ji * 6 + li * 4), mul(LF.a, ji * 8)), 0.28 + fi * 0.1 + ji * 0.05, () => plate(LF, -4.5, 4.5, lw + (ji === 0 ? 1.5 : 0), lw * 0.96, half, half, p.plateThick + (ji === 0 ? 0.8 : 0), (edge && lit.gaps) || (popped && pose.pop.t > 0.02) ? { lit: true } : {}, 0.6 + li * 0.45)));
         });
       });
     });
@@ -482,7 +502,7 @@ export function makeGlove(k, G, M, P, Z0) {
         const t0 = s0 / len, t1 = s1 / len;
         const wa = w0 + (w1 - w0) * t0, wb = w0 + (w1 - w0) * t1;
         const ha = h0 + (h1 - h0) * t0, hb = h0 + (h1 - h0) * t1;
-        push(4, flip ? 890 + bi * 0.5 : 900 + bi * 10 + 5, plate(F, s0, s1, wa + 2.4, wb + 2.4, ha / 2, hb / 2, p.plateThick, {}, 0, bi === 2));
+        push(4, flip ? 890 + bi * 0.5 : 900 + bi * 10 + 5, moved(add(mul(F.v, 36), mul(F.a, 6 + bi * 10)), 0.15 + bi * 0.04, () => plate(F, s0, s1, wa + 2.4, wb + 2.4, ha / 2, hb / 2, p.plateThick, {}, 0, bi === 2)));
       }
     });
     return items;

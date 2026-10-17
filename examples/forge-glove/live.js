@@ -34,6 +34,13 @@ const BENT = { mcp: 0.18, pip: 1.15, dip: 0.6 };
 const STRAIGHT = { mcp: 0, pip: 0, dip: 0 };
 // End of act 0: the formed hand turns palm-up and the repulsor lights.
 const SHOW_PALM = 2.6;
+// Act 0, Jarvis view: the armour hangs exploded around the bare hand, then pulls in.
+const HOLD_APART = 1.2;
+const ASSEMBLE = 3.2;
+const ASSEMBLED = HOLD_APART + ASSEMBLE + 0.4;
+// Take-apart view, any time: click the glove or press A.
+let apartTarget = 0;
+let apartNow = 0;
 const PALM_UP = 1.95;
 // "Hold it on" plays the minute 13× faster.
 const HEAT_PLAY = 4.6;
@@ -48,7 +55,7 @@ const LEVER_WORDS = {
   spreader: (a, b) => `heat spreader ${a} → ${b} g of aluminium`,
 };
 const WHY = {
-  how: "Three small gear motors in the cuff wind the plates out along rails. The back of the hand forms first, then the fingers, then the thumb; each plate stops on a small magnet in the thin liner glove, so the rest slide past it, like a telescope opening. Then the hand turns over to show the palm repulsor: in this build it is a ring of LEDs behind a lens, a light and not a thruster, and it is not yet counted in the weight or the battery.",
+  how: "Jarvis view: every piece of armour hangs around a bare hand, then pulls into place: the palm repulsor and thumb plates, the finger shells with a lame (a small overlapping plate) over each knuckle, and last the three back plates. The hand turns over to show the repulsor, a real LED spotlight. In the real glove nothing flies: three small gear motors in the cuff wind the plates out along rails, which plays in Unfold. Click the glove, or press A, to take it apart at any time.",
   unfold: "The speed comes from the motor's datasheet (310 rpm with no load) slowed by the drag of every plate it pushes.",
   fist: "Closing a fist stretches the back of each knuckle. Each lame (a small overlapping plate, like the scales of a medieval gauntlet) can slide about 8 mm before it uncovers what's under it. The big knuckle stretches about 18 mm.",
   pinch: "If a finger is still bent while the glove forms, a plate edge pushes into it. Pain depends on pressure, the push spread over the area it touches, and a 1.6 mm plate edge concentrates it.",
@@ -110,7 +117,7 @@ function markActs() {
 function durationOf(id, m) {
   const slow = m === "slow" ? 3 : 1;
   if (m === "fix") return 2.2;
-  if (id === "how") return M.deployOf(params).time / 0.45 + 2.4 + SHOW_PALM;
+  if (id === "how") return ASSEMBLED + SHOW_PALM + 0.8;
   if (id === "unfold") return M.deployOf(params).time + 2;
   if (id === "fist") return (1.1 * slow) + 2.2;
   if (id === "pinch") return M.deployOf(params).time * slow + 2.4;
@@ -146,16 +153,17 @@ function pendulumAt(t, fails) {
 function frameOf(id, m, t) {
   const slow = m === "slow" ? 1 / 3 : 1;
   const out = { pose: { deploy: FORMED }, cuff: [1, 0], alpha: 0, gauge: 1, lit: false };
+  if (id === "how") {
+    const r = t - ASSEMBLED;
+    out.cuff = [0, 0];
+    out.pose = { deploy: FORMED, apart: 1 - ease((t - HOLD_APART) / ASSEMBLE), roll: PALM_UP * ease(r / 1.1), glow: ease((r - 1.0) / 0.5) };
+    return out;
+  }
   if (id === "how" || id === "unfold") {
     const speed = id === "how" ? 0.45 : 1;
     const open = ease(t / 0.35);
     out.cuff = [open, Math.min(open, 1 - ease((t - M.deployOf(params).time / speed - 0.6) / 0.8))];
     out.pose = { deploy: deployAt(t, speed) };
-    if (id === "how") {
-      const r = t - (M.deployOf(params).time / speed + 1.4);
-      out.pose.roll = PALM_UP * ease(r / 1.1);
-      out.pose.glow = ease((r - 1.0) / 0.5);
-    }
     return out;
   }
   if (id === "fist") {
@@ -211,6 +219,7 @@ function frameOf(id, m, t) {
 }
 
 function paint(f) {
+  if (act !== "how" || apartNow > 0.001) f.pose = { ...f.pose, apart: Math.max(f.pose.apart ?? 0, apartNow) };
   handG.innerHTML = glove.hand(f.pose, params);
   cuffG.innerHTML = glove.cuff(f.cuff[0], f.cuff[1]);
   const front = Math.sin(f.alpha) * D.ARM + D.PIVOT[1] > -24;
@@ -252,7 +261,6 @@ function caption() {
   }
   if (act === "pinch" || act === "knock") lines.push(UNITS);
   if (fixing) lines.push(`<b>Fix:</b> ${LEVER_WORDS[fixing.key](fixing.from, fixing.to)} (${fixing.cost >= 0 ? "+" : ""}${fixing.cost.toFixed(0)} g). Same act again next.`);
-  if (act === "how") lines.push("Shown at half speed.");
   if (act === "fist" && mode === "slow") lines.push("Replayed at one-third speed.");
   return lines.join(" ");
 }
@@ -265,7 +273,7 @@ function say() {
   if (titleEl.textContent !== title) titleEl.textContent = title;
   const text = mode === "fix" && fixing ? `fixing: ${LEVER_WORDS[fixing.key](fixing.from, fixing.to)}` : words();
   if (readout.textContent !== text) readout.textContent = text;
-  const hint = touring ? "Watching the test campaign · click to take over" : "Click an act · click a knob to change the design";
+  const hint = touring ? "Watching the test campaign · click to take over" : apartTarget ? "Taken apart · click the glove to put it back" : "Click the glove to take it apart · click a knob to change it";
   if (hintEl.textContent !== hint) hintEl.textContent = hint;
   const html = caption();
   if (captionEl.innerHTML !== html) captionEl.innerHTML = html;
@@ -289,6 +297,8 @@ function tick(now) {
   const dt = last ? Math.min((now - last) / 1000, 1 / 30) : 1 / 60;
   last = now;
   clock += still.matches ? 99 : dt;
+  apartNow = still.matches ? apartTarget : apartNow + (apartTarget - apartNow) * (1 - Math.exp(-dt * 3.2));
+  if (Math.abs(apartTarget - apartNow) < 0.002) apartNow = apartTarget;
   if (mode === "fix" && fixing) {
     const share = ease((clock - 0.3) / 1.2);
     if (knobEls[fixing.key]) {
@@ -315,7 +325,7 @@ function tick(now) {
     start(step.act, step.mode ?? "play", step.fix ?? null);
     return;
   }
-  const moving = !done || act === "summary";
+  const moving = !done || act === "summary" || apartNow !== apartTarget;
   frame = visible && (moving || touring) ? requestAnimationFrame(tick) : 0;
 }
 
@@ -331,6 +341,8 @@ function takeOver() {
 
 function reset(play) {
   params = { ...INITIAL };
+  apartTarget = 0;
+  apartNow = 0;
   failedOnce = new Set();
   for (const key of Object.keys(knobAt)) knobAt[key] = M.CONTROLS[key].values.indexOf(params[key]);
   if (play) start(TOUR[0].act);
@@ -350,11 +362,20 @@ for (const [key, el] of Object.entries(knobEls)) {
   el.addEventListener("click", (event) => { event.stopPropagation(); takeOver(); setControl(key, M.CONTROLS[key].values.indexOf(params[key]) + 1); });
   el.addEventListener("pointerenter", () => { const spec = M.CONTROLS[key]; const value = params[key]; hintEl.textContent = `${spec.label}: ${spec.names?.[value] ?? value + (spec.unit ?? "")} · click to change`; });
 }
+function toggleApart() {
+  takeOver();
+  apartTarget = apartTarget ? 0 : 1;
+  say();
+  run();
+}
+handG.style.cursor = "pointer";
+handG.addEventListener("click", (event) => { event.stopPropagation(); toggleApart(); });
 for (const button of actButtons) button.addEventListener("click", () => { takeOver(); start(button.dataset.act, "play"); });
 stage.addEventListener("keydown", (event) => {
   const ids = ["how", "unfold", "fist", "pinch", "knock", "beam", "heat", "day"];
   if (/^[0-7]$/.test(event.key)) { takeOver(); start(ids[Number(event.key)]); event.preventDefault(); }
   if (event.key === "s" || event.key === "S") { takeOver(); start("summary"); }
+  if (event.key === "a" || event.key === "A") { toggleApart(); event.preventDefault(); }
   if (event.key === "r" || event.key === "R") { takeOver(); reset(false); start("how"); }
   if (event.key === "f" || event.key === "F") {
     const fix = M.fixesOf(params).steps.find((f) => f.act === act) ?? M.fixesOf(params).steps[0];
